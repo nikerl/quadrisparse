@@ -60,6 +60,8 @@ module quadrilatero_perm_unit #(
   logic                           fifo_empty         ;
 
   localparam int unsigned USAGE = DEPTH > 1 ? $clog2(DEPTH)-1 : 0;
+  localparam int unsigned FIFO_DW = $clog2(N_REGS) + xif_pkg::X_ID_WIDTH;
+  typedef logic [FIFO_DW-1:0] fifo_data_t;
   logic [USAGE:0] fifo_usage;
   logic           fifo_almost_full;
   //----------------------------------------------------------------------------------------------------------
@@ -67,7 +69,7 @@ module quadrilatero_perm_unit #(
   fifo_v3 #(
       .FALL_THROUGH  (1'b1                                          ),
       .DEPTH         (DEPTH                                         ),
-      .dtype         (logic [$clog2(N_REGS)+xif_pkg::X_ID_WIDTH-1:0])
+      .dtype         (fifo_data_t                                   )
   ) i_fifo (
       .clk_i         (clk_i                      ),
       .rst_ni        (rst_ni                     ),
