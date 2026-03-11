@@ -1,237 +1,360 @@
 `timescale 1ns/1ps
 
 module quadrilatero_xif_tb;
-  import quadrilatero_pkg::*;
-  import xif_pkg::*;
+	import quadrilatero_pkg::*;
+	import xif_pkg::*;
 
-  localparam int CLK_PERIOD_NS = 10;
+	localparam int CLK_PERIOD_NS = 10;
+	localparam logic [31:0] A_BASE = 32'h0000_0000;
+	localparam logic [31:0] B_BASE = 32'h0000_0100;
+	localparam logic [31:0] C_BASE = 32'h0000_0200;
+	localparam logic [31:0] ROW_STRIDE = 32'd16;
 
-  logic clk_i;
-  logic rst_ni;
+	logic clk_i;
+	logic rst_ni;
 
-  // Memory interface to OBI (simple stub)
-  logic                          mem_req_o;
-  logic                          mem_we_o;
-  logic [BUS_WIDTH/8-1:0]        mem_be_o;
-  logic [31:0]                   mem_addr_o;
-  logic [BUS_WIDTH-1:0]          mem_wdata_o;
-  logic                          mem_gnt_i;
-  logic                          mem_rvalid_i;
-  logic [BUS_WIDTH-1:0]          mem_rdata_i;
+	logic						mem_req;
+	logic						mem_we;
+	logic [BUS_WIDTH/8-1:0]		mem_be;
+	logic [31:0]				mem_addr;
+	logic [BUS_WIDTH-1:0]		mem_wdata;
+	logic						mem_gnt;
+	logic						mem_rvalid;
+	logic [BUS_WIDTH-1:0]		mem_rdata;
 
-  // Compressed interface (unused by DUT)
-  logic               x_compressed_valid_i;
-  logic               x_compressed_ready_o;
-  x_compressed_req_t  x_compressed_req_i;
-  x_compressed_resp_t x_compressed_resp_o;
+	logic				x_compressed_valid;
+	logic				x_compressed_ready;
+	x_compressed_req_t	x_compressed_req;
+	x_compressed_resp_t	x_compressed_resp;
 
-  // Issue interface
-  logic         x_issue_valid_i;
-  logic         x_issue_ready_o;
-  x_issue_req_t x_issue_req_i;
-  x_issue_resp_t x_issue_resp_o;
+	logic				x_issue_valid;
+	logic				x_issue_ready;
+	x_issue_req_t		x_issue_req;
+	x_issue_resp_t		x_issue_resp;
 
-  // Commit interface
-  logic      x_commit_valid_i;
-  x_commit_t x_commit_i;
+	logic				x_commit_valid;
+	x_commit_t			x_commit;
 
-  // Memory request/response interface (unused by DUT)
-  logic        x_mem_valid_o;
-  logic        x_mem_ready_i;
-  x_mem_req_t  x_mem_req_o;
-  x_mem_resp_t x_mem_resp_i;
+	logic				x_mem_valid;
+	logic				x_mem_ready;
+	x_mem_req_t			x_mem_req;
+	x_mem_resp_t		x_mem_resp;
 
-  // Memory result interface (unused by DUT)
-  logic          x_mem_result_valid_i;
-  x_mem_result_t x_mem_result_i;
+	logic				x_mem_result_valid;
+	x_mem_result_t		x_mem_result;
 
-  // Result interface
-  logic      x_result_valid_o;
-  logic      x_result_ready_i;
-  x_result_t x_result_o;
+	logic				x_result_valid;
+	logic				x_result_ready;
+	x_result_t			x_result;
 
-  // DUT
-  quadrilatero #(
-      .INPUT_BUFFER_DEPTH(4),
-      .RES_IF_FIFO_DEPTH (8),
-      .FPU               (1)
-  ) dut (
-      .clk_i,
-      .rst_ni,
-      .mem_req_o,
-      .mem_we_o,
-      .mem_be_o,
-      .mem_addr_o,
-      .mem_wdata_o,
-      .mem_gnt_i,
-      .mem_rvalid_i,
-      .mem_rdata_i,
-      .x_compressed_valid_i,
-      .x_compressed_ready_o,
-      .x_compressed_req_i,
-      .x_compressed_resp_o,
-      .x_issue_valid_i,
-      .x_issue_ready_o,
-      .x_issue_req_i,
-      .x_issue_resp_o,
-      .x_commit_valid_i,
-      .x_commit_i,
-      .x_mem_valid_o,
-      .x_mem_ready_i,
-      .x_mem_req_o,
-      .x_mem_resp_i,
-      .x_mem_result_valid_i,
-      .x_mem_result_i,
-      .x_result_valid_o,
-      .x_result_ready_i,
-      .x_result_o
-  );
+	logic [127:0]		mem_model [0:255];
+	logic				read_pending_q;
+	logic [31:0]		read_addr_q;
 
-  // Clock generation
-  initial begin
-    clk_i = 1'b0;
-    forever #(CLK_PERIOD_NS/2) clk_i = ~clk_i;
-  end
+	int unsigned completed_results;
+	integer r;
 
-  // Simple memory model: always grant; one-cycle read response
-  always_ff @(posedge clk_i or negedge rst_ni) begin
-    if (!rst_ni) begin
-      mem_gnt_i    <= 1'b0;
-      mem_rvalid_i <= 1'b0;
-      mem_rdata_i  <= '0;
-    end else begin
-      mem_gnt_i    <= mem_req_o;
-      mem_rvalid_i <= mem_req_o && !mem_we_o;
-      mem_rdata_i  <= 32'h1234_5678;
-    end
-  end
+	function automatic logic [31:0] enc_mld_w(input logic [2:0] md);
+		logic [31:0] instr;
+		begin
+			instr         = '0;
+			instr[31:25]  = 7'b0000000;
+			instr[14:12]  = 3'b000;
+			instr[11:10]  = 2'b10;
+			instr[9:7]    = md;
+			instr[6:0]    = 7'b0101011;
+			return instr;
+		end
+	endfunction
 
-  // Utility function to build one valid MZERO encoding.
-  function automatic logic [31:0] build_mzero(input logic [2:0] md);
-    logic [31:0] instr;
-    begin
-      instr         = '0;
-      instr[31:27]  = 5'b11111;
-      instr[17:15]  = md;
-      instr[6:0]    = 7'b0101011;
-      build_mzero   = instr;
-    end
-  endfunction
+	function automatic logic [31:0] enc_mst_w(input logic [2:0] ms1);
+		logic [31:0] instr;
+		begin
+			instr         = '0;
+			instr[31:25]  = 7'b0000110;
+			instr[14:12]  = 3'b000;
+			instr[11:10]  = 2'b10;
+			instr[9:7]    = ms1;
+			instr[6:0]    = 7'b0101011;
+			return instr;
+		end
+	endfunction
 
-  task automatic issue_instr(
-      input logic [31:0] instr,
-      input logic [X_ID_WIDTH-1:0] instr_id,
-      output logic accepted
-  );
-    begin
-      x_issue_req_i          = '0;
-      x_issue_req_i.instr    = instr;
-      x_issue_req_i.id       = instr_id;
-      x_issue_req_i.mode     = 2'b11;
-      x_issue_req_i.rs       = '0;
-      x_issue_req_i.rs_valid = '0;
-      x_issue_req_i.ecs      = '0;
-      x_issue_req_i.ecs_valid = 1'b0;
+	function automatic logic [31:0] enc_mzero(input logic [2:0] md);
+		logic [31:0] instr;
+		begin
+			instr         = '0;
+			instr[31:18]  = 14'b11111000000000;
+			instr[17:15]  = md;
+			instr[14:12]  = 3'b000;
+			instr[11:7]   = 5'b00000;
+			instr[6:0]    = 7'b0101011;
+			return instr;
+		end
+	endfunction
 
-      x_issue_valid_i = 1'b1;
-      do begin
-        @(posedge clk_i);
-      end while (!x_issue_ready_o);
+	function automatic logic [31:0] enc_mmasa_w(
+		input logic [2:0] weight_reg,
+		input logic [2:0] data_reg,
+		input logic [2:0] acc_reg
+	);
+		logic [31:0] instr;
+		begin
+			instr         = '0;
+			instr[31:24]  = 8'b11110000;
+			instr[23:21]  = data_reg;
+			instr[20:18]  = weight_reg;
+			instr[17:15]  = acc_reg;
+			instr[14:12]  = 3'b000;
+			instr[11:7]   = 5'b10000;
+			instr[6:0]    = 7'b0101011;
+			return instr;
+		end
+	endfunction
 
-      accepted      = x_issue_resp_o.accept;
-      x_issue_valid_i = 1'b0;
-      @(posedge clk_i);
+	task automatic issue_and_commit(
+		input logic [31:0] instr,
+		input logic [31:0] rs0,
+		input logic [31:0] rs1,
+		input logic [3:0]  id
+	);
+		begin
+			@(posedge clk_i);
+			x_issue_req.instr    <= instr;
+			x_issue_req.id       <= id;
+			x_issue_req.mode     <= 2'b11;
+			x_issue_req.rs[0]    <= rs0;
+			x_issue_req.rs[1]    <= rs1;
+			x_issue_req.rs_valid <= 2'b11;
+			x_issue_req.ecs      <= '0;
+			x_issue_req.ecs_valid <= 1'b0;
+			x_issue_valid        <= 1'b1;
 
-      $display("[%0t] ISSUE id=%0d instr=0x%08h ready=%0b accept=%0b", $time, instr_id, instr, x_issue_ready_o, accepted);
-    end
-  endtask
+			do begin
+				@(posedge clk_i);
+			end while (!x_issue_ready);
 
-  task automatic commit_instr(
-      input logic [X_ID_WIDTH-1:0] instr_id,
-      input logic kill
-  );
-    begin
-      x_commit_i.id          = instr_id;
-      x_commit_i.commit_kill = kill;
-      x_commit_valid_i       = 1'b1;
-      @(posedge clk_i);
-      x_commit_valid_i       = 1'b0;
-      $display("[%0t] COMMIT id=%0d kill=%0b", $time, instr_id, kill);
-    end
-  endtask
+			x_issue_valid <= 1'b0;
 
-  task automatic wait_result_id(
-      input logic [X_ID_WIDTH-1:0] exp_id,
-      input int timeout_cycles,
-      output logic seen
-  );
-    int i;
-    begin
-      seen = 1'b0;
-      for (i = 0; i < timeout_cycles; i++) begin
-        @(posedge clk_i);
-        if (x_result_valid_o) begin
-          $display("[%0t] RESULT id=%0d (expected %0d)", $time, x_result_o.id, exp_id);
-          if (x_result_o.id !== exp_id) begin
-            $fatal(1, "Unexpected result ID: got %0d expected %0d", x_result_o.id, exp_id);
-          end
-          seen = 1'b1;
-          return;
-        end
-      end
-      $display("[%0t] INFO: no result observed within %0d cycles for id=%0d", $time, timeout_cycles, exp_id);
-    end
-  endtask
+			x_commit.id          <= id;
+			x_commit.commit_kill <= 1'b0;
+			x_commit_valid       <= 1'b1;
+			@(posedge clk_i);
+			x_commit_valid       <= 1'b0;
+		end
+	endtask
 
-  logic accepted;
-  logic got_result;
+	function automatic logic [127:0] pack_row_lsb_first(input logic [31:0] e0, e1, e2, e3);
+	  return {e3, e2, e1, e0};
+	endfunction
 
-  initial begin
-    // Default drives
-    rst_ni                = 1'b0;
-    x_compressed_valid_i  = 1'b0;
-    x_compressed_req_i    = '0;
+	// Clock generation
+	initial begin
+		clk_i = 1'b0;
+		forever #(CLK_PERIOD_NS/2) clk_i = ~clk_i;
+	end
 
-    x_issue_valid_i       = 1'b0;
-    x_issue_req_i         = '0;
+	// Simple memory model: one-cycle read response, immediate write acceptance.
+	assign mem_gnt = 1'b1;
 
-    x_commit_valid_i      = 1'b0;
-    x_commit_i            = '0;
+	always_ff @(posedge clk_i or negedge rst_ni) begin
+		if (!rst_ni) begin
+			read_pending_q <= 1'b0;
+			read_addr_q    <= '0;
+			mem_rvalid     <= 1'b0;
+			mem_rdata      <= '0;
+		end else begin
+			mem_rvalid <= 1'b0;
 
-    x_mem_ready_i         = 1'b1;
-    x_mem_resp_i          = '0;
-    x_mem_result_valid_i  = 1'b0;
-    x_mem_result_i        = '0;
+			if (read_pending_q) begin
+				mem_rvalid <= 1'b1;
+				mem_rdata  <= mem_model[read_addr_q[31:4]];
+			end
 
-    x_result_ready_i      = 1'b1;
+			read_pending_q <= 1'b0;
+			if (mem_req && mem_gnt && !mem_we) begin
+				read_pending_q <= 1'b1;
+				read_addr_q    <= mem_addr;
+			end
 
-    repeat (5) @(posedge clk_i);
-    rst_ni = 1'b1;
-    repeat (2) @(posedge clk_i);
+			if (mem_req && mem_gnt && mem_we) begin
+				for (int b = 0; b < BUS_WIDTH/8; b++) begin
+					if (mem_be[b]) begin
+						mem_model[mem_addr[31:4]][8*b +: 8] <= mem_wdata[8*b +: 8];
+					end
+				end
+			end
+		end
+	end
 
-    // 1) Send an invalid instruction: should not be accepted by XIF decoder.
-    issue_instr(32'h0000_0013, 4'h1, accepted); // ADDI x0, x0, 0
-    if (accepted) begin
-      $fatal(1, "Invalid non-matrix instruction was unexpectedly accepted");
-    end
+	// Track completed coprocessor instructions.
+	always_ff @(posedge clk_i or negedge rst_ni) begin
+		if (!rst_ni) begin
+			completed_results <= 0;
+		end else if (x_result_valid && x_result_ready) begin
+			completed_results <= completed_results + 1;
+			$display("[TB] completed instruction id=%0d", x_result.id);
+		end
+	end
 
-    // 2) Send a valid matrix instruction (MZERO) and commit it.
-    issue_instr(build_mzero(3'd2), 4'h2, accepted);
-    if (!accepted) begin
-      $fatal(1, "Valid MZERO instruction was not accepted");
-    end
-    commit_instr(4'h2, 1'b0);
+	quadrilatero #(
+		.FPU(0)
+	) dut (
+		.clk_i,
+		.rst_ni,
 
-    // 3) Optional: watch for a completion ID for a bounded time.
-    // This keeps the testbench as a lightweight interface smoke test.
-    wait_result_id(4'h2, 400, got_result);
-    if (!got_result) begin
-      $display("[%0t] INFO: continuing after result timeout (interface drive test only)", $time);
-    end
+		.mem_req_o    (mem_req),
+		.mem_we_o     (mem_we),
+		.mem_be_o     (mem_be),
+		.mem_addr_o   (mem_addr),
+		.mem_wdata_o  (mem_wdata),
+		.mem_gnt_i    (mem_gnt),
+		.mem_rvalid_i (mem_rvalid),
+		.mem_rdata_i  (mem_rdata),
 
-    $display("[%0t] TEST PASSED", $time);
-    repeat (5) @(posedge clk_i);
-    $finish;
-  end
+		.x_compressed_valid_i (x_compressed_valid),
+		.x_compressed_ready_o (x_compressed_ready),
+		.x_compressed_req_i   (x_compressed_req),
+		.x_compressed_resp_o  (x_compressed_resp),
+
+		.x_issue_valid_i (x_issue_valid),
+		.x_issue_ready_o (x_issue_ready),
+		.x_issue_req_i   (x_issue_req),
+		.x_issue_resp_o  (x_issue_resp),
+
+		.x_commit_valid_i (x_commit_valid),
+		.x_commit_i       (x_commit),
+
+		.x_mem_valid_o        (x_mem_valid),
+		.x_mem_ready_i        (x_mem_ready),
+		.x_mem_req_o          (x_mem_req),
+		.x_mem_resp_i         (x_mem_resp),
+		.x_mem_result_valid_i (x_mem_result_valid),
+		.x_mem_result_i       (x_mem_result),
+
+		.x_result_valid_o (x_result_valid),
+		.x_result_ready_i (x_result_ready),
+		.x_result_o       (x_result)
+	);
+
+	initial begin
+		rst_ni              = 1'b0;
+		x_compressed_valid  = 1'b0;
+		x_compressed_req    = '0;
+		x_issue_valid       = 1'b0;
+		x_issue_req         = '0;
+		x_commit_valid      = 1'b0;
+		x_commit            = '0;
+		x_mem_ready         = 1'b1;
+		x_mem_resp          = '0;
+		x_mem_result_valid  = 1'b0;
+		x_mem_result        = '0;
+		x_result_ready      = 1'b1;
+
+		for (int i = 0; i < 256; i++) begin
+			mem_model[i] = '0;
+		end
+
+		// Matrix A (4x4), row-major.
+		mem_model[(A_BASE >> 4) + 0] = pack_row_lsb_first(32'd1, 32'd2, 32'd3, 32'd4);
+		mem_model[(A_BASE >> 4) + 1] = pack_row_lsb_first(32'd5, 32'd6, 32'd7, 32'd8);
+		mem_model[(A_BASE >> 4) + 2] = pack_row_lsb_first(32'd9, 32'd10, 32'd11, 32'd12);
+		mem_model[(A_BASE >> 4) + 3] = pack_row_lsb_first(32'd13, 32'd14, 32'd15, 32'd16);
+
+		// Matrix B (4x4), col-major.
+		mem_model[(B_BASE >> 4) + 0] = pack_row_lsb_first(32'd1, 32'd5, 32'd9, 32'd13);
+		mem_model[(B_BASE >> 4) + 1] = pack_row_lsb_first(32'd2, 32'd6, 32'd10, 32'd14);
+		mem_model[(B_BASE >> 4) + 2] = pack_row_lsb_first(32'd3, 32'd7, 32'd11, 32'd15);
+		mem_model[(B_BASE >> 4) + 3] = pack_row_lsb_first(32'd4, 32'd8, 32'd12, 32'd16);
+
+		repeat (6) @(posedge clk_i);
+		rst_ni = 1'b1;
+		repeat (4) @(posedge clk_i);
+
+
+		// mld.w m0, [A_BASE], stride=16
+		issue_and_commit(enc_mld_w(3'd0), A_BASE, ROW_STRIDE, 4'd1);
+
+		// mld.w m1, [B_BASE], stride=16
+		issue_and_commit(enc_mld_w(3'd1), B_BASE, ROW_STRIDE, 4'd2);
+
+		// mzero m2
+		issue_and_commit(enc_mzero(3'd2), 32'd0, 32'd0, 4'd3);
+
+		// mmasa.w m2 += m0 * m1
+		issue_and_commit(enc_mmasa_w(3'd0, 3'd1, 3'd2), 32'd0, 32'd0, 4'd4);
+
+		// mst.w m2, [C_BASE], stride=16
+		issue_and_commit(enc_mst_w(3'd2), C_BASE, ROW_STRIDE, 4'd5);
+
+		wait (completed_results >= 5);
+		repeat (10) @(posedge clk_i);
+
+		$display("\n[TB] Input matrix A row-major (from memory @ 0x%08x):", A_BASE);
+		for (r = 0; r < 4; r = r + 1) begin
+			logic [127:0] rowA;
+			rowA = mem_model[(A_BASE >> 4) + r];
+			$display("[TB] %0d %0d %0d %0d",
+				$signed(rowA[31:0]),
+				$signed(rowA[63:32]),
+				$signed(rowA[95:64]),
+				$signed(rowA[127:96])
+			);
+		end
+
+		$display("\n[TB] Input matrix B col-major (from memory @ 0x%08x):", B_BASE);
+		for (r = 0; r < 4; r = r + 1) begin
+			logic [127:0] rowB;
+			rowB = mem_model[(B_BASE >> 4) + r];
+			$display("[TB] %0d %0d %0d %0d",
+				$signed(rowB[31:0]),
+				$signed(rowB[63:32]),
+				$signed(rowB[95:64]),
+				$signed(rowB[127:96])
+			);
+		end
+
+		$display("\n[TB] Result matrix C row-major (from memory @ 0x%08x):", C_BASE);
+		for (r = 0; r < 4; r = r + 1) begin
+			logic [127:0] rowC;
+			rowC = mem_model[(C_BASE >> 4) + r];
+			$display("[TB] %0d %0d %0d %0d",
+				$signed(rowC[31:0]),
+				$signed(rowC[63:32]),
+				$signed(rowC[95:64]),
+				$signed(rowC[127:96])
+			);
+		end
+
+
+		issue_and_commit(enc_mzero(3'd2), 32'd0, 32'd0, 4'd6);
+
+		issue_and_commit(enc_mst_w(3'd2), C_BASE, ROW_STRIDE, 4'd7);
+
+		$display("");
+		wait (completed_results >= 6);
+		repeat (10) @(posedge clk_i);
+
+		$display("\n[TB] Result matrix C After Zeroing (from memory @ 0x%08x):", C_BASE);
+		for (r = 0; r < 4; r = r + 1) begin
+			logic [127:0] rowC;
+			rowC = mem_model[(C_BASE >> 4) + r];
+			$display("[TB] %0d %0d %0d %0d",
+				$signed(rowC[31:0]),
+				$signed(rowC[63:32]),
+				$signed(rowC[95:64]),
+				$signed(rowC[127:96])
+			);
+		end
+
+		
+		$finish;
+	end
+
+
+	initial begin
+		#50000ns;
+		$fatal(1, "[TB] Timeout waiting for matrix multiplication flow.");
+	end
 
 endmodule
