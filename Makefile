@@ -3,12 +3,18 @@
 
 SHELL := /bin/bash
 
+# Use all available CPU cores by default unless jobs are explicitly configured.
+ifeq (,$(filter -j% --jobs=% --jobs% --jobserver%,$(MAKEFLAGS)))
+MAKEFLAGS += -j$(shell nproc)
+endif
+
 TOP      ?= quadrilatero_xif_tb
 TB_FILE  ?= tb/quadrilatero_xif_tb.sv
 BUILD_DIR ?= build
 FLIST    ?= $(BUILD_DIR)/flist.f
 SIMV     ?= $(BUILD_DIR)/simv
 OBJ_DIR  ?= $(BUILD_DIR)/obj_dir
+VERILATOR_SIMV ?= $(OBJ_DIR)/$(notdir $(SIMV))
 
 VERILATOR ?= verilator
 VERILATOR_FLAGS ?= --binary --timing -Wall -Wno-fatal
@@ -18,7 +24,10 @@ IVERILOG ?= iverilog
 VVP      ?= vvp
 BENDER   ?= bender
 
-.PHONY: help deps flist compile verilate run compile-iverilog run-iverilog clean
+# Local HDL sources that should trigger recompilation when edited.
+RTL_SRCS := $(shell find rtl tb -type f \( -name '*.sv' -o -name '*.svh' \))
+
+.PHONY: help deps compile verilate run compile-iverilog run-iverilog clean
 
 help:
 	@echo "Targets:"
@@ -37,17 +46,24 @@ $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
 # Generate a Verilator-friendly file list from Bender sources, then append the testbench.
-flist: | $(BUILD_DIR)
-	$(BENDER) script flist-plus | grep -v 'pad_functional\.sv' > $(FLIST)
-	printf "%s\n" "$(TB_FILE)" >> $(FLIST)
+# Keep timestamp stable when content is unchanged to preserve incremental builds.
+flist: $(FLIST)
 
-compile: verilate
+$(FLIST): | $(BUILD_DIR)
+	@tmp="$@.tmp"; \
+	$(BENDER) script flist-plus | grep -v 'pad_functional\.sv' > "$$tmp"; \
+	printf "%s\n" "$(TB_FILE)" >> "$$tmp"; \
+	if [ -f "$@" ] && cmp -s "$$tmp" "$@"; then rm -f "$$tmp"; else mv -f "$$tmp" "$@"; fi
 
-verilate: flist
+compile: $(VERILATOR_SIMV)
+
+verilate: compile
+
+$(VERILATOR_SIMV): $(FLIST) $(RTL_SRCS) Bender.yml
 	$(VERILATOR) $(VERILATOR_FLAGS) --top-module $(TOP) -f $(FLIST) --Mdir $(OBJ_DIR) -o $(notdir $(SIMV))
 
-run: compile
-	$(OBJ_DIR)/$(notdir $(SIMV))
+run: $(VERILATOR_SIMV)
+	$(VERILATOR_SIMV)
 
 compile-iverilog: flist
 	$(IVERILOG) -g2012 -s $(TOP) -o $(SIMV) -f $(FLIST)
