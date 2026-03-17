@@ -11,6 +11,11 @@ module quadrilatero_xif_tb;
 	import quadrilatero_pkg::*;
 	import xif_pkg::*;
 
+	localparam int MEM_DEPTH = 256;
+	localparam int MATRIX_SIZE = 4; // matrix size (adjustable)
+	localparam int NUM_INSTR = 6; // number of instructions (adjustable)
+	localparam int TIMEOUT_NS = 50000; // simulation timeout
+
 	localparam int CLK_PERIOD_NS = 10;
 	localparam logic [31:0] A_BASE = 32'h0000_0000;
 	localparam logic [31:0] B_BASE = 32'h0000_0100;
@@ -64,6 +69,9 @@ module quadrilatero_xif_tb;
 	logic [31:0]		read_addr_q;
 
 	int unsigned completed_results;
+	int unsigned cycle_count;
+	int unsigned start_cycle;
+	bit started;
 	integer r;
 
 	function automatic logic [31:0] enc_mld_w(input logic [2:0] md);
@@ -230,9 +238,45 @@ module quadrilatero_xif_tb;
 		if (!rst_ni) begin
 			completed_results <= 0;
 		end else if (x_result_valid && x_result_ready) begin
-			completed_results <= completed_results + 1;
-			$display("[TB] completed instruction id=%0d", x_result.id);
+			    completed_results <= completed_results + 1;
+
+    $display("[TB] Instruction id=%0d finished at cycle %0d",
+             x_result.id, cycle_count);
 		end
+	end
+
+	// Global clock cycles
+	always_ff @(posedge clk_i or negedge rst_ni) begin
+		if (!rst_ni) begin
+			cycle_count <= 0;
+		end
+		else begin
+			cycle_count <= cycle_count + 1;
+		end
+	end
+
+	// Start counting on first issued instruction
+	always_ff @(posedge clk_i or negedge rst_ni) begin
+			if (!rst_ni) begin
+					started <= 0;
+			end else if (!started && x_issue_valid && x_issue_ready) begin
+					start_cycle <= cycle_count;
+					started <= 1;
+			end
+	end
+
+	bit printed;
+
+	always_ff @(posedge clk_i or negedge rst_ni) begin
+			if (!rst_ni) begin
+					printed <= 0;
+			end else if (x_result_valid && x_result_ready) begin
+					if (!printed && (completed_results == NUM_INSTR)) begin
+							$display("\n[TB] Total execution cycles: %0d\n",
+											cycle_count - start_cycle);
+							printed <= 1;
+					end
+			end
 	end
 
 	quadrilatero #(
@@ -289,7 +333,7 @@ module quadrilatero_xif_tb;
 		x_mem_result        = '0;
 		x_result_ready      = 1'b1;
 
-		for (int i = 0; i < 256; i++) begin
+		for (int i = 0; i < MEM_DEPTH; i++) begin
 			mem_model[i] = '0;
 		end
 
@@ -363,7 +407,7 @@ module quadrilatero_xif_tb;
 		end
 
 		$display("\n[TB] Sparse reconstructed tile (from memory @ 0x%08x):", SPARSE_OUT_BASE);
-		for (r = 0; r < 4; r = r + 1) begin
+		for (r = 0; r < MATRIX_SIZE; r = r + 1) begin
 			logic [127:0] rowS;
 			rowS = mem_model[(SPARSE_OUT_BASE >> 4) + r];
 			$display("[TB] %0d %0d %0d %0d",
@@ -399,7 +443,7 @@ module quadrilatero_xif_tb;
 
 
 		$display("\n[TB] Input matrix B col-major (from memory @ 0x%08x):", B_BASE);
-		for (r = 0; r < 4; r = r + 1) begin
+		for (r = 0; r < MATRIX_SIZE; r = r + 1) begin
 			logic [127:0] rowB;
 			rowB = mem_model[(B_BASE >> 4) + r];
 			$display("[TB] %0d %0d %0d %0d",
@@ -411,7 +455,7 @@ module quadrilatero_xif_tb;
 		end
 
 		$display("\n[TB] Result matrix C row-major (from memory @ 0x%08x):", C_BASE);
-		for (r = 0; r < 4; r = r + 1) begin
+		for (r = 0; r < MATRIX_SIZE; r = r + 1) begin
 			logic [127:0] rowC;
 			rowC = mem_model[(C_BASE >> 4) + r];
 			$display("[TB] %0d %0d %0d %0d",
