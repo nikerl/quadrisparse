@@ -91,6 +91,7 @@ module quadrilatero
   logic                                                                                decoder_rf_writeback          ;
   logic                                                                                decoder_instr_valid           ;
   logic                                                                                decoder_is_store_out          ;
+  logic                                                                                decoder_is_sparse_out         ;
   logic                                                                                decoder_is_float_out          ;
   quadrilatero_pkg::execution_units_t                                                    decoder_exec_unit             ;
   quadrilatero_pkg::datatype_t                                                           decoder_datatype_out          ;
@@ -100,6 +101,7 @@ module quadrilatero
   // Dispatcher
   logic                                                                                         dispatcher_rf_writeback          ;
   logic                                                                                         dispatcher_is_store_out          ;
+  logic                                                                                         dispatcher_is_sparse_out         ;
   logic                                                                                         dispatcher_is_float_out          ;
   logic                                                                                         dispatcher_instr_valid           ;
   logic                                                                                         dispatcher_instr_ready           ;
@@ -213,6 +215,18 @@ module quadrilatero
 
 
   // LSU
+  logic                                      lsu_sel_csr          ;
+  logic                                      lsu_std_data_req     ;
+  logic [31:0]                               lsu_std_data_addr    ;
+  logic                                      lsu_std_data_we      ;
+  logic [quadrilatero_pkg::BUS_WIDTH/8-1:0]    lsu_std_data_be      ;
+  logic [quadrilatero_pkg::BUS_WIDTH  -1:0]    lsu_std_data_wdata   ;
+  logic                                      lsu_csr_data_req     ;
+  logic [31:0]                               lsu_csr_data_addr    ;
+  logic                                      lsu_csr_data_we      ;
+  logic [quadrilatero_pkg::BUS_WIDTH/8-1:0]    lsu_csr_data_be      ;
+  logic [quadrilatero_pkg::BUS_WIDTH  -1:0]    lsu_csr_data_wdata   ;
+
   logic                                      lsu_data_req         ;
   logic                                      lsu_data_gnt         ;
   logic                                      lsu_data_rvalid      ;
@@ -241,6 +255,30 @@ module quadrilatero
   logic                                      lsu_finished         ;
   logic                                      lsu_finished_ack     ;
   logic [xif_pkg::X_ID_WIDTH-1:0]            lsu_finished_instr_id;
+
+  logic                                      lsu_std_we               ;
+  logic                                      lsu_std_wlast            ;
+  logic [xif_pkg::X_ID_WIDTH-1:0]            lsu_std_id               ;
+  logic [quadrilatero_pkg::RLEN-1:0]           lsu_std_wdata            ;
+  logic [$clog2(quadrilatero_pkg::N_REGS)-1:0] lsu_std_waddr            ;
+  logic [$clog2(quadrilatero_pkg::N_ROWS)-1:0] lsu_std_wrowaddr         ;
+  logic                                      lsu_std_rlast            ;
+  logic                                      lsu_std_rready           ;
+  logic [$clog2(quadrilatero_pkg::N_REGS)-1:0] lsu_std_raddr            ;
+  logic [$clog2(quadrilatero_pkg::N_ROWS)-1:0] lsu_std_rrowaddr         ;
+  logic                                      lsu_std_busy             ;
+  logic                                      lsu_std_finished         ;
+  logic [xif_pkg::X_ID_WIDTH-1:0]            lsu_std_finished_instr_id;
+
+  logic                                      lsu_csr_we               ;
+  logic                                      lsu_csr_wlast            ;
+  logic [xif_pkg::X_ID_WIDTH-1:0]            lsu_csr_id               ;
+  logic [quadrilatero_pkg::RLEN-1:0]           lsu_csr_wdata            ;
+  logic [$clog2(quadrilatero_pkg::N_REGS)-1:0] lsu_csr_waddr            ;
+  logic [$clog2(quadrilatero_pkg::N_ROWS)-1:0] lsu_csr_wrowaddr         ;
+  logic                                      lsu_csr_busy             ;
+  logic                                      lsu_csr_finished         ;
+  logic [xif_pkg::X_ID_WIDTH-1:0]            lsu_csr_finished_instr_id;
 
 
   // Permutation Unit
@@ -418,6 +456,7 @@ module quadrilatero
       .instr_valid_o             (decoder_instr_valid           ),
       .datatype_o                (decoder_datatype_out          ),
       .is_store_o                (decoder_is_store_out          ),
+      .is_sparse_o               (decoder_is_sparse_out         ),
       .is_float_o                (decoder_is_float_out          )
   );
 
@@ -471,6 +510,7 @@ module quadrilatero
       .n_matrix_operands_read_i   (dispatcher_n_matrix_operands_read),  // how many reads to RF
       .datatype_i                 (decoder_datatype_out             ),
       .is_store_i                 (decoder_is_store_out             ),
+      .is_sparse_i                (decoder_is_sparse_out            ),
       .is_float_i                 (decoder_is_float_out             ),
       .rf_read_regs_i             (dispatcher_rf_read_regs          ),  // which registers to read from 
       .rf_writeback_i             (dispatcher_rf_writeback          ),  // whether we need to write to the register file
@@ -482,6 +522,7 @@ module quadrilatero
       .instr_id_o                 (dispatcher_instr_id_out          ),
       .datatype_o                 (dispatcher_instr_datatype_out    ),
       .is_store_o                 (dispatcher_is_store_out          ),
+      .is_sparse_o                (dispatcher_is_sparse_out         ),
       .is_float_o                 (dispatcher_is_float_out          ),
       .reg_ms1_o                  (dispatcher_reg_ms1               ),
       .reg_ms2_o                  (dispatcher_reg_ms2               ),
@@ -739,11 +780,18 @@ module quadrilatero
     lsu_ctrl_dispatched_instr.addr        = dispatcher_rs_out[0]                                             ;
     lsu_ctrl_dispatched_instr.id          = dispatcher_instr_id_out                                          ;  // instruction id
     lsu_ctrl_dispatched_instr.is_store    = dispatcher_is_store_out                                          ;
+    lsu_ctrl_dispatched_instr.is_sparse   = dispatcher_is_sparse_out                                         ;
     lsu_ctrl_dispatched_instr.operand_reg = (dispatcher_is_store_out) ? dispatcher_reg_ms1: dispatcher_reg_md;  // destination register
 
     // FIX THIS : extract from CSR
     lsu_ctrl_csr_config.n_col_bytes = quadrilatero_pkg::RLEN / 8       ;  // all bytes
     lsu_ctrl_csr_config.n_rows      = quadrilatero_pkg::MESH_WIDTH     ;  // hardcoded full matrix
+    lsu_ctrl_csr_config.val_base    = 32'h0000_0300;
+    lsu_ctrl_csr_config.col_idx_base= 32'h0000_0340;
+    lsu_ctrl_csr_config.row_ptr_base= 32'h0000_0380;
+
+    // Dense and sparse LSU paths are mutually exclusive per issued instruction.
+    lsu_sel_csr = lsu_csr_busy | lsu_ctrl_issued_instr.is_sparse;
 
     // OBI Interface signals
     lsu_data_gnt    = mem_gnt_i      ;
@@ -759,6 +807,29 @@ module quadrilatero
     lsu_wready = rf_seq_wready_from_fu[quadrilatero_pkg::LSU_W];
     lsu_rvalid = rf_seq_rvalid_from_fu[quadrilatero_pkg::LSU_R];
     lsu_rdata  = rf_seq_rdata_from_fu [quadrilatero_pkg::LSU_R];
+
+    // Shared LSU outputs selected by active path.
+    lsu_data_req   = lsu_sel_csr ? lsu_csr_data_req   : lsu_std_data_req;
+    lsu_data_addr  = lsu_sel_csr ? lsu_csr_data_addr  : lsu_std_data_addr;
+    lsu_data_we    = lsu_sel_csr ? lsu_csr_data_we    : lsu_std_data_we;
+    lsu_data_be    = lsu_sel_csr ? lsu_csr_data_be    : lsu_std_data_be;
+    lsu_data_wdata = lsu_sel_csr ? lsu_csr_data_wdata : lsu_std_data_wdata;
+
+    lsu_we      = lsu_sel_csr ? lsu_csr_we      : lsu_std_we;
+    lsu_wlast   = lsu_sel_csr ? lsu_csr_wlast   : lsu_std_wlast;
+    lsu_wdata   = lsu_sel_csr ? lsu_csr_wdata   : lsu_std_wdata;
+    lsu_waddr   = lsu_sel_csr ? lsu_csr_waddr   : lsu_std_waddr;
+    lsu_wrowaddr= lsu_sel_csr ? lsu_csr_wrowaddr: lsu_std_wrowaddr;
+    lsu_id      = lsu_sel_csr ? lsu_csr_id      : lsu_std_id;
+
+    lsu_rready  = lsu_sel_csr ? 1'b0 : lsu_std_rready;
+    lsu_raddr   = lsu_sel_csr ? '0   : lsu_std_raddr;
+    lsu_rrowaddr= lsu_sel_csr ? '0   : lsu_std_rrowaddr;
+    lsu_rlast   = lsu_sel_csr ? 1'b0 : lsu_std_rlast;
+
+    lsu_busy    = lsu_std_busy | lsu_csr_busy;
+    lsu_finished = lsu_std_finished | lsu_csr_finished;
+    lsu_finished_instr_id = lsu_std_finished ? lsu_std_finished_instr_id : lsu_csr_finished_instr_id;
   end
 
   quadrilatero_register_lsu_controller #(
@@ -788,51 +859,96 @@ module quadrilatero
       .rst_ni                                                        ,
 
       // Data interface
-      .data_req_o           (lsu_data_req                           ),
+      .data_req_o           (lsu_std_data_req                       ),
       .data_gnt_i           (lsu_data_gnt                           ),
       .data_rvalid_i        (lsu_data_rvalid                        ),
 
-      .data_addr_o          (lsu_data_addr                          ),
-      .data_we_o            (lsu_data_we                            ),
-      .data_be_o            (lsu_data_be                            ),
+      .data_addr_o          (lsu_std_data_addr                      ),
+      .data_we_o            (lsu_std_data_we                        ),
+      .data_be_o            (lsu_std_data_be                        ),
       .data_rdata_i         (lsu_data_rdata                         ),
-      .data_wdata_o         (lsu_data_wdata                         ),
+      .data_wdata_o         (lsu_std_data_wdata                     ),
 
       // Register Write Port for Load Unit
-      .waddr_o              (lsu_waddr                              ),
-      .wrowaddr_o           (lsu_wrowaddr                           ),
-      .wdata_o              (lsu_wdata                              ),
-      .we_o                 (lsu_we                                 ),
-      .wlast_o              (lsu_wlast                              ),
+      .waddr_o              (lsu_std_waddr                          ),
+      .wrowaddr_o           (lsu_std_wrowaddr                       ),
+      .wdata_o              (lsu_std_wdata                          ),
+      .we_o                 (lsu_std_we                             ),
+      .wlast_o              (lsu_std_wlast                          ),
       .wready_i             (lsu_wready                             ),
 
       // Register Read Port for Store Unit
-      .raddr_o              (lsu_raddr                              ),
-      .rrowaddr_o           (lsu_rrowaddr                           ),
+      .raddr_o              (lsu_std_raddr                          ),
+      .rrowaddr_o           (lsu_std_rrowaddr                       ),
       .rdata_i              (lsu_rdata                              ),
       .rdata_valid_i        (lsu_rvalid                             ),
-      .rdata_ready_o        (lsu_rready                             ),
-      .rlast_o              (lsu_rlast                              ),
+      .rdata_ready_o        (lsu_std_rready                         ),
+      .rlast_o              (lsu_std_rlast                          ),
 
       // Configuration Signals
       .stride_i             (lsu_ctrl_issued_instr.stride           ),  // stride value
       .address_i            (lsu_ctrl_issued_instr.addr             ),  // address value
       .operand_reg_i        (lsu_ctrl_issued_instr.operand_reg      ),  // destination register
       .instr_id_i           (lsu_ctrl_issued_instr.id               ),  // id of the instruction
-      .start_i              (lsu_ctrl_start                         ),  // start loading
+      .start_i              (lsu_ctrl_start & ~lsu_ctrl_issued_instr.is_sparse),  // start loading
       .write_i              (lsu_ctrl_issued_instr.is_store         ),
 
       // Coming from CSR
       .n_bytes_cols_i       (lsu_ctrl_issued_instr_conf.n_col_bytes ),
       .n_rows_i             (lsu_ctrl_issued_instr_conf.n_rows      ),
-      .busy_o               (lsu_busy                               ),
-      .lsu_id_o             (lsu_id                                 ),
+      .busy_o               (lsu_std_busy                           ),
+      .lsu_id_o             (lsu_std_id                             ),
 
       // Finished instruction
-      .finished_o           (lsu_finished                           ),
+        .finished_o           (lsu_std_finished                       ),
       .finished_ack_i       (lsu_finished_ack                       ),
-      .finished_instr_id_o  (lsu_finished_instr_id                  )
+        .finished_instr_id_o  (lsu_std_finished_instr_id              )
   );
+
+      quadrilatero_csr_tile_loader #(
+        .BUS_WIDTH            (quadrilatero_pkg::BUS_WIDTH),
+        .N_REGS               (quadrilatero_pkg::N_REGS   ),
+        .N_ROWS               (quadrilatero_pkg::N_ROWS   )
+      ) csr_tile_loader_i (
+        .clk_i                                                         ,
+        .rst_ni                                                        ,
+
+        // Data interface
+        .data_req_o           (lsu_csr_data_req                       ),
+        .data_gnt_i           (lsu_data_gnt                           ),
+        .data_rvalid_i        (lsu_data_rvalid                        ),
+        .data_addr_o          (lsu_csr_data_addr                      ),
+        .data_we_o            (lsu_csr_data_we                        ),
+        .data_be_o            (lsu_csr_data_be                        ),
+        .data_rdata_i         (lsu_data_rdata                         ),
+        .data_wdata_o         (lsu_csr_data_wdata                     ),
+
+        // Register Write Port
+        .waddr_o              (lsu_csr_waddr                          ),
+        .wrowaddr_o           (lsu_csr_wrowaddr                       ),
+        .wdata_o              (lsu_csr_wdata                          ),
+        .we_o                 (lsu_csr_we                             ),
+        .wlast_o              (lsu_csr_wlast                          ),
+        .wready_i             (lsu_wready                             ),
+        .lsu_id_o             (lsu_csr_id                             ),
+
+        // Configuration
+        .start_i              (lsu_ctrl_start & lsu_ctrl_issued_instr.is_sparse),
+        .nnz_offset_i         (lsu_ctrl_issued_instr.addr             ),
+        .cfg_addr_i           (lsu_ctrl_issued_instr.stride           ),
+        .operand_reg_i        (lsu_ctrl_issued_instr.operand_reg      ),
+        .instr_id_i           (lsu_ctrl_issued_instr.id               ),
+        .n_rows_i             (lsu_ctrl_issued_instr_conf.n_rows      ),
+        .val_base_i           (lsu_ctrl_issued_instr_conf.val_base    ),
+        .col_idx_base_i       (lsu_ctrl_issued_instr_conf.col_idx_base),
+        .row_ptr_base_i       (lsu_ctrl_issued_instr_conf.row_ptr_base),
+        .busy_o               (lsu_csr_busy                           ),
+
+        // Finished instruction
+        .finished_o           (lsu_csr_finished                       ),
+        .finished_ack_i       (lsu_finished_ack                       ),
+        .finished_instr_id_o  (lsu_csr_finished_instr_id              )
+      );
 
 
   //*********************

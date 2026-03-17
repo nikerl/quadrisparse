@@ -1,3 +1,10 @@
+// Copyright 2026
+// Solderpad Hardware License, Version 2.1,see LICENSE.md for details.
+// SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+//
+// Author: Nik Erlandsson
+// Author: Oskar Swärd
+
 `timescale 1ns/1ps
 
 module quadrilatero_xif_tb;
@@ -8,6 +15,11 @@ module quadrilatero_xif_tb;
 	localparam logic [31:0] A_BASE = 32'h0000_0000;
 	localparam logic [31:0] B_BASE = 32'h0000_0100;
 	localparam logic [31:0] C_BASE = 32'h0000_0200;
+	localparam logic [31:0] CSR_BASE = 32'h0000_0300;
+	localparam logic [31:0] CSR_VAL_BASE = 32'h0000_0400;
+	localparam logic [31:0] CSR_COL_BASE = 32'h0000_0500;
+	localparam logic [31:0] CSR_ROW_BASE = 32'h0000_0600;
+	localparam logic [31:0] SPARSE_OUT_BASE = 32'h0000_0700; //debug
 	localparam logic [31:0] ROW_STRIDE = 32'd16;
 
 	logic clk_i;
@@ -111,6 +123,32 @@ module quadrilatero_xif_tb;
 			return instr;
 		end
 	endfunction
+
+	function automatic logic [31:0] enc_mldcsr_w(input logic [2:0] md);
+		logic [31:0] instr;
+		begin
+			instr         = '0;
+			instr[31:25]  = 7'b0001110;
+			instr[14:12]  = 3'b000;
+			instr[11:10]  = 2'b10;
+			instr[9:7]    = md;
+			instr[6:0]    = 7'b0101011;
+			return instr;
+		end
+	endfunction
+
+	task automatic mem_write_word(
+		input logic [31:0] addr,
+		input logic [31:0] value
+	);
+		logic [7:0] line_idx;
+		logic [1:0] word_idx;
+		begin
+			line_idx = addr[11:4];
+			word_idx = addr[3:2];
+			mem_model[line_idx][32*word_idx +: 32] = value;
+		end
+	endtask
 
 	task automatic issue_and_commit(
 		input logic [31:0] instr,
@@ -267,40 +305,98 @@ module quadrilatero_xif_tb;
 		mem_model[(B_BASE >> 4) + 2] = pack_row_lsb_first(32'd3, 32'd7, 32'd11, 32'd15);
 		mem_model[(B_BASE >> 4) + 3] = pack_row_lsb_first(32'd4, 32'd8, 32'd12, 32'd16);
 
+		// CSR test matrix (4x4), one non-zero per row on the diagonal.
+		// val     = [11, 22, 33, 44]
+		// col_idx = [ 0,  1,  2,  3]
+		// row_ptr = [ 0,  1,  2,  3, 4]
+		mem_write_word(CSR_VAL_BASE + 32'd0, 32'd1);
+		mem_write_word(CSR_VAL_BASE + 32'd4, 32'd2);
+		mem_write_word(CSR_VAL_BASE + 32'd8, 32'd3);
+		mem_write_word(CSR_VAL_BASE + 32'd12, 32'd4);
+		mem_write_word(CSR_VAL_BASE + 32'd16, 32'd5);
+
+		mem_write_word(CSR_COL_BASE + 32'd0, 32'd0);
+		mem_write_word(CSR_COL_BASE + 32'd4, 32'd2);
+		mem_write_word(CSR_COL_BASE + 32'd8, 32'd1);
+		mem_write_word(CSR_COL_BASE + 32'd12, 32'd3);
+		mem_write_word(CSR_COL_BASE + 32'd16, 32'd0);
+
+		mem_write_word(CSR_ROW_BASE + 32'd0, 32'd0);
+		mem_write_word(CSR_ROW_BASE + 32'd4, 32'd1);
+		mem_write_word(CSR_ROW_BASE + 32'd8, 32'd2);
+		mem_write_word(CSR_ROW_BASE + 32'd12, 32'd3);
+		mem_write_word(CSR_ROW_BASE + 32'd16, 32'd5);
+
+		// CSR_BASE descriptor pointed by mldcsr rs1:
+		// [0] val_base, [1] col_idx_base, [2] row_ptr_base
+		mem_write_word(CSR_BASE + 32'd0, CSR_VAL_BASE);
+		mem_write_word(CSR_BASE + 32'd4, CSR_COL_BASE);
+		mem_write_word(CSR_BASE + 32'd8, CSR_ROW_BASE);
+		
+
+
 		repeat (6) @(posedge clk_i);
 		rst_ni = 1'b1;
 		repeat (4) @(posedge clk_i);
 
 
 		// mld.w m0, [A_BASE], stride=16
-		issue_and_commit(enc_mld_w(3'd0), A_BASE, ROW_STRIDE, 4'd1);
+		//issue_and_commit(enc_mld_w(3'd0), A_BASE, ROW_STRIDE, 4'd1);
 
-		// mld.w m1, [B_BASE], stride=16
-		issue_and_commit(enc_mld_w(3'd1), B_BASE, ROW_STRIDE, 4'd2);
 
-		// mzero m2
-		issue_and_commit(enc_mzero(3'd2), 32'd0, 32'd0, 4'd3);
+		// Sparse path: rs0 is nnz_offset. Use offset=0.
+		issue_and_commit(enc_mldcsr_w(3'd0), 32'd0, CSR_BASE, 4'd1);
+		issue_and_commit(enc_mst_w(3'd0), SPARSE_OUT_BASE, ROW_STRIDE, 4'd2);
 
-		// mmasa.w m2 += m0 * m1
-		issue_and_commit(enc_mmasa_w(3'd0, 3'd1, 3'd2), 32'd0, 32'd0, 4'd4);
-
-		// mst.w m2, [C_BASE], stride=16
-		issue_and_commit(enc_mst_w(3'd2), C_BASE, ROW_STRIDE, 4'd5);
-
-		wait (completed_results >= 5);
+		$display("");
+		wait (completed_results >= 0);
 		repeat (10) @(posedge clk_i);
+		
+		repeat (200) begin
+			@(posedge clk_i);
+			if (completed_results >= 2) begin
+				break;
+			end
+		end
+		if (completed_results < 2) begin
+			$display("[TB] WARNING: sparse mldcsr/mst did not both complete (completed_results=%0d)", completed_results);
+		end
 
-		$display("\n[TB] Input matrix A row-major (from memory @ 0x%08x):", A_BASE);
+		$display("\n[TB] Sparse reconstructed tile (from memory @ 0x%08x):", SPARSE_OUT_BASE);
 		for (r = 0; r < 4; r = r + 1) begin
-			logic [127:0] rowA;
-			rowA = mem_model[(A_BASE >> 4) + r];
+			logic [127:0] rowS;
+			rowS = mem_model[(SPARSE_OUT_BASE >> 4) + r];
 			$display("[TB] %0d %0d %0d %0d",
-				$signed(rowA[31:0]),
-				$signed(rowA[63:32]),
-				$signed(rowA[95:64]),
-				$signed(rowA[127:96])
+				$signed(rowS[31:0]),
+				$signed(rowS[63:32]),
+				$signed(rowS[95:64]),
+				$signed(rowS[127:96])
 			);
 		end
+
+		if (mem_model[(SPARSE_OUT_BASE >> 4) + 0] !== pack_row_lsb_first(32'd1, 32'd0 , 32'd0 , 32'd0) ||
+		    mem_model[(SPARSE_OUT_BASE >> 4) + 1] !== pack_row_lsb_first(32'd0 , 32'd0, 32'd2 , 32'd0) ||
+		    mem_model[(SPARSE_OUT_BASE >> 4) + 2] !== pack_row_lsb_first(32'd0 , 32'd3 , 32'd0, 32'd0) ||
+		    mem_model[(SPARSE_OUT_BASE >> 4) + 3] !== pack_row_lsb_first(32'd5 , 32'd0 , 32'd0 , 32'd4)) begin
+			$fatal(1, "[TB] Sparse tile mismatch.");
+		end
+
+
+		// mld.w m1, [B_BASE], stride=16
+		issue_and_commit(enc_mld_w(3'd1), B_BASE, ROW_STRIDE, 4'd3);
+
+		// mzero m2
+		issue_and_commit(enc_mzero(3'd2), 32'd0, 32'd0, 4'd4);
+
+		// mmasa.w m2 += m0 * m1
+		issue_and_commit(enc_mmasa_w(3'd0, 3'd1, 3'd2), 32'd0, 32'd0, 4'd5);
+
+		// mst.w m2, [C_BASE], stride=16
+		issue_and_commit(enc_mst_w(3'd2), C_BASE, ROW_STRIDE, 4'd6);
+
+		wait (completed_results >= 6);
+		repeat (10) @(posedge clk_i);
+
 
 		$display("\n[TB] Input matrix B col-major (from memory @ 0x%08x):", B_BASE);
 		for (r = 0; r < 4; r = r + 1) begin
@@ -326,25 +422,11 @@ module quadrilatero_xif_tb;
 			);
 		end
 
-
-		issue_and_commit(enc_mzero(3'd2), 32'd0, 32'd0, 4'd6);
-
-		issue_and_commit(enc_mst_w(3'd2), C_BASE, ROW_STRIDE, 4'd7);
-
-		$display("");
-		wait (completed_results >= 6);
-		repeat (10) @(posedge clk_i);
-
-		$display("\n[TB] Result matrix C After Zeroing (from memory @ 0x%08x):", C_BASE);
-		for (r = 0; r < 4; r = r + 1) begin
-			logic [127:0] rowC;
-			rowC = mem_model[(C_BASE >> 4) + r];
-			$display("[TB] %0d %0d %0d %0d",
-				$signed(rowC[31:0]),
-				$signed(rowC[63:32]),
-				$signed(rowC[95:64]),
-				$signed(rowC[127:96])
-			);
+		if (mem_model[(C_BASE >> 4) + 0] !== pack_row_lsb_first(32'd1, 32'd2 , 32'd3 , 32'd4 ) ||
+		    mem_model[(C_BASE >> 4) + 1] !== pack_row_lsb_first(32'd18, 32'd20, 32'd22, 32'd24) ||
+		    mem_model[(C_BASE >> 4) + 2] !== pack_row_lsb_first(32'd15, 32'd18, 32'd21, 32'd24) ||
+		    mem_model[(C_BASE >> 4) + 3] !== pack_row_lsb_first(32'd57, 32'd66, 32'd75, 32'd84)) begin
+			$fatal(1, "[TB] Dense result mismatch after sparse m0 * m1 path.");
 		end
 
 		

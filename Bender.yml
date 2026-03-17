@@ -23,6 +23,7 @@ sources:
   - rtl/quadrilatero_ff_fs_dr_stage.sv
   - rtl/quadrilatero_fixed_prio_arbiter.sv
   - rtl/quadrilatero_lsu.sv
+  - rtl/quadrilatero_csr_tile_loader.sv
   - rtl/quadrilatero_mac_float.sv
   - rtl/quadrilatero_mac_int.sv
   - rtl/quadrilatero_mesh.sv
@@ -40,3 +41,4 @@ sources:
   - rtl/quadrilatero_wl_stage.sv
   - rtl/quadrilatero_wrapper.sv
   - rtl/quadrilatero_xif_decoder.sv
+  
