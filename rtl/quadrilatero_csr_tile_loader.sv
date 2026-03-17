@@ -41,9 +41,6 @@ module quadrilatero_csr_tile_loader #(
     input  logic [$clog2(N_REGS)-1:0]     operand_reg_i,
     input  logic [xif_pkg::X_ID_WIDTH-1:0] instr_id_i,
     input  logic [31:0]                   n_rows_i,
-    input  logic [31:0]                   val_base_i,
-    input  logic [31:0]                   col_idx_base_i,
-    input  logic [31:0]                   row_ptr_base_i,
     output logic                          busy_o,
 
     output logic                          finished_o,
@@ -195,16 +192,12 @@ module quadrilatero_csr_tile_loader #(
           col_lane_d   = 2'b00;
           nnz_offset_d = nnz_offset_i;
           cfg_addr_d   = cfg_addr_i;
-          val_base_d   = val_base_i;
-          col_idx_base_d = col_idx_base_i;
-          row_ptr_base_d = row_ptr_base_i;
+          val_base_d   = 32'h0;
+          col_idx_base_d = 32'h0;
+          row_ptr_base_d = 32'h0;
           waddr_d      = operand_reg_i;
           instr_id_d   = instr_id_i;
-          if (cfg_addr_i != 32'h0) begin
-            state_d = S_READ_CFG_VAL_BASE;
-          end else begin
-            state_d = S_FIND_ROW_NEXT;
-          end
+          state_d = S_READ_CFG_VAL_BASE;
         end
       end
 

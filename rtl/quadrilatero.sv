@@ -783,12 +783,11 @@ module quadrilatero
     lsu_ctrl_dispatched_instr.is_sparse   = dispatcher_is_sparse_out                                         ;
     lsu_ctrl_dispatched_instr.operand_reg = (dispatcher_is_store_out) ? dispatcher_reg_ms1: dispatcher_reg_md;  // destination register
 
-    // FIX THIS : extract from CSR
+    // Sparse loader fetches val/col/row base addresses from the descriptor
+    // pointed by mldcsr rs1 (cfg_addr_i).
+    lsu_ctrl_csr_config             = '0;
     lsu_ctrl_csr_config.n_col_bytes = quadrilatero_pkg::RLEN / 8       ;  // all bytes
     lsu_ctrl_csr_config.n_rows      = quadrilatero_pkg::MESH_WIDTH     ;  // hardcoded full matrix
-    lsu_ctrl_csr_config.val_base    = 32'h0000_0300;
-    lsu_ctrl_csr_config.col_idx_base= 32'h0000_0340;
-    lsu_ctrl_csr_config.row_ptr_base= 32'h0000_0380;
 
     // Dense and sparse LSU paths are mutually exclusive per issued instruction.
     lsu_sel_csr = lsu_csr_busy | lsu_ctrl_issued_instr.is_sparse;
@@ -939,9 +938,6 @@ module quadrilatero
         .operand_reg_i        (lsu_ctrl_issued_instr.operand_reg      ),
         .instr_id_i           (lsu_ctrl_issued_instr.id               ),
         .n_rows_i             (lsu_ctrl_issued_instr_conf.n_rows      ),
-        .val_base_i           (lsu_ctrl_issued_instr_conf.val_base    ),
-        .col_idx_base_i       (lsu_ctrl_issued_instr_conf.col_idx_base),
-        .row_ptr_base_i       (lsu_ctrl_issued_instr_conf.row_ptr_base),
         .busy_o               (lsu_csr_busy                           ),
 
         // Finished instruction
