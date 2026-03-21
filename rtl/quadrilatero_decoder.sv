@@ -151,11 +151,11 @@ module quadrilatero_decoder
       end
 
       quadrilatero_instr_pkg::SPLD_W: begin
-        instr_valid_0            = '1;
+        instr_valid_o            = '1;
         exec_unit_o              = quadrilatero_pkg::FU_LSU;
         rf_writeback_reg_o       = instr_i[9:7];
         datatype_o               = quadrilatero_pkg::SIZE_32;
-        rf_writeback_reg_o       = '1;
+        rf_writeback_o       = '1;
         is_sparse_o              = '1;
       end
       /*

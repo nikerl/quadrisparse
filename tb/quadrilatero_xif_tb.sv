@@ -67,6 +67,19 @@ module quadrilatero_xif_tb;
 		end
 	endfunction
 
+	function automatic logic [31:0] enc_spld_w(input logic [2:0] md);
+		logic [31:0] instr;
+		begin
+			instr         = '0;
+			instr[31:25]  = 7'b0010000; // funct7
+			instr[14:12]  = 3'b000;     // funct3
+			instr[11:10]  = 2'b10;
+			instr[9:7]    = md;         // destination reg
+			instr[6:0]    = 7'b0101011; // opcode
+			return instr;
+		end
+	endfunction
+
 	function automatic logic [31:0] enc_mst_w(input logic [2:0] ms1);
 		logic [31:0] instr;
 		begin
@@ -274,6 +287,9 @@ module quadrilatero_xif_tb;
 
 		// mld.w m0, [A_BASE], stride=16
 		issue_and_commit(enc_mld_w(3'd0), A_BASE, ROW_STRIDE, 4'd1);
+
+		// spld.w
+		issue_and_commit(enc_spld_w(3'd0), A_BASE, ROW_STRIDE, 4'd8);
 
 		// mld.w m1, [B_BASE], stride=16
 		issue_and_commit(enc_mld_w(3'd1), B_BASE, ROW_STRIDE, 4'd2);
