@@ -54,6 +54,7 @@ module quadrilatero_register_lsu #(
     input  logic [                   31:0] stride_i           ,  // stride value
     input  logic [                   31:0] address_i          ,  // address value
     input  logic [     $clog2(N_REGS)-1:0] operand_reg_i      ,  // destination register
+    input  logic [     $clog2(N_REGS)-1:0] index_reg_i        ,  // dense-load row-index source register
     input  logic [xif_pkg::X_ID_WIDTH-1:0] instr_id_i         ,  // instruction id
     input  logic [                   31:0] n_bytes_cols_i     ,  // we always fetch the entire row and then only take the elements we need 
     input  logic [                   31:0] n_rows_i           ,
@@ -278,7 +279,7 @@ module quadrilatero_register_lsu #(
   // Skeleton hook for new dense-load path visibility.
   always_ff @(posedge clk_i) begin
     if (rst_ni && start_i && is_dense_i) begin
-      $display("[LSU] dense instruction start: id=%0d addr=0x%08h stride=%0d dst_reg=%0d is_store=%0b", instr_id_i, address_i, stride_i, operand_reg_i, write_i);
+      $display("[LSU] dense instruction start: id=%0d addr=0x%08h stride=%0d dst_reg=%0d sp_reg=%0d is_store=%0b", instr_id_i, address_i, stride_i, operand_reg_i, index_reg_i, write_i);
     end
   end
 `endif

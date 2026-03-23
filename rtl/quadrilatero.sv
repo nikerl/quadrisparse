@@ -746,6 +746,7 @@ module quadrilatero
     lsu_ctrl_dispatched_instr.is_store    = dispatcher_is_store_out                                          ;
     lsu_ctrl_dispatched_instr.is_dense    = dispatcher_is_dense_out                                          ;
     lsu_ctrl_dispatched_instr.operand_reg = (dispatcher_is_store_out) ? dispatcher_reg_ms1: dispatcher_reg_md;  // destination register
+    lsu_ctrl_dispatched_instr.index_reg   = dispatcher_reg_ms1                                                ;  // source register for DLD row indices
 
     // FIX THIS : extract from CSR
     lsu_ctrl_csr_config.n_col_bytes = quadrilatero_pkg::RLEN / 8       ;  // all bytes
@@ -824,6 +825,7 @@ module quadrilatero
       .stride_i             (lsu_ctrl_issued_instr.stride           ),  // stride value
       .address_i            (lsu_ctrl_issued_instr.addr             ),  // address value
       .operand_reg_i        (lsu_ctrl_issued_instr.operand_reg      ),  // destination register
+      .index_reg_i          (lsu_ctrl_issued_instr.index_reg        ),  // row-index source register (DLD)
       .instr_id_i           (lsu_ctrl_issued_instr.id               ),  // id of the instruction
       .start_i              (lsu_ctrl_start                         ),  // start loading
       .write_i              (lsu_ctrl_issued_instr.is_store         ),

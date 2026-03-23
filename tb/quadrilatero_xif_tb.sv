@@ -67,11 +67,14 @@ module quadrilatero_xif_tb;
 		end
 	endfunction
 
-	function automatic logic [31:0] enc_dld_w(input logic [2:0] md);
+	// md: destination matrix register
+	// msp: the sparse matrix register containing the row incidices to load
+	function automatic logic [31:0] enc_dld_w(input logic [2:0] md, input logic [2:0] msp);
 		logic [31:0] instr;
 		begin
 			instr         = '0;
 			instr[31:25]  = 7'b0000010;
+			instr[17:15]  = msp;
 			instr[14:12]  = 3'b000;
 			instr[11:10]  = 2'b10;
 			instr[9:7]    = md;
@@ -268,17 +271,20 @@ module quadrilatero_xif_tb;
 			mem_model[i] = '0;
 		end
 
-		// Matrix A (4x4), row-major.
+		// Simulated sparse matrix loaded into register.
 		mem_model[(A_BASE >> 4) + 0] = pack_row_lsb_first(32'd1, 32'd2, 32'd3, 32'd4);
-		mem_model[(A_BASE >> 4) + 1] = pack_row_lsb_first(32'd5, 32'd6, 32'd7, 32'd8);
-		mem_model[(A_BASE >> 4) + 2] = pack_row_lsb_first(32'd9, 32'd10, 32'd11, 32'd12);
-		mem_model[(A_BASE >> 4) + 3] = pack_row_lsb_first(32'd13, 32'd14, 32'd15, 32'd16);
+		mem_model[(A_BASE >> 4) + 1] = pack_row_lsb_first(32'd0, 32'd2, 32'd4, 32'd5);
+		mem_model[(A_BASE >> 4) + 2] = pack_row_lsb_first(32'd0, 32'd0, 32'd0, 32'd0);
+		mem_model[(A_BASE >> 4) + 3] = pack_row_lsb_first(32'd0, 32'd0, 32'd0, 32'd0);
 
-		// Matrix B (4x4), col-major.
-		mem_model[(B_BASE >> 4) + 0] = pack_row_lsb_first(32'd1, 32'd5, 32'd9, 32'd13);
-		mem_model[(B_BASE >> 4) + 1] = pack_row_lsb_first(32'd2, 32'd6, 32'd10, 32'd14);
-		mem_model[(B_BASE >> 4) + 2] = pack_row_lsb_first(32'd3, 32'd7, 32'd11, 32'd15);
-		mem_model[(B_BASE >> 4) + 3] = pack_row_lsb_first(32'd4, 32'd8, 32'd12, 32'd16);
+		// Dense matrix B, row-major.
+		mem_model[(B_BASE >> 4) + 0] = pack_row_lsb_first(32'd0, 32'd0, 32'd0, 32'd0);
+		mem_model[(B_BASE >> 4) + 1] = pack_row_lsb_first(32'd1, 32'd1, 32'd1, 32'd1);
+		mem_model[(B_BASE >> 4) + 2] = pack_row_lsb_first(32'd2, 32'd2, 32'd2, 32'd2);
+		mem_model[(B_BASE >> 4) + 3] = pack_row_lsb_first(32'd3, 32'd3, 32'd3, 32'd3);
+		mem_model[(B_BASE >> 4) + 4] = pack_row_lsb_first(32'd4, 32'd4, 32'd4, 32'd4);
+		mem_model[(B_BASE >> 4) + 5] = pack_row_lsb_first(32'd5, 32'd5, 32'd5, 32'd5);
+		mem_model[(B_BASE >> 4) + 6] = pack_row_lsb_first(32'd6, 32'd6, 32'd6, 32'd6);
 
 		repeat (6) @(posedge clk_i);
 		rst_ni = 1'b1;
@@ -288,11 +294,8 @@ module quadrilatero_xif_tb;
 		// mld.w m0, [A_BASE], stride=16
 		issue_and_commit(enc_mld_w(3'd0), A_BASE, ROW_STRIDE, 4'd1);
 
-
-		issue_and_commit(enc_dld_w(3'd0), A_BASE, ROW_STRIDE, 4'd1);
-
-		// mld.w m1, [B_BASE], stride=16
-		issue_and_commit(enc_mld_w(3'd1), B_BASE, ROW_STRIDE, 4'd2);
+		// dld.w m1, [B_BASE], stride=16, index_reg=m0
+		issue_and_commit(enc_dld_w(3'd1, 3'd0), B_BASE, ROW_STRIDE, 4'd2);
 
 		// mzero m2
 		issue_and_commit(enc_mzero(3'd2), 32'd0, 32'd0, 4'd3);
@@ -303,7 +306,7 @@ module quadrilatero_xif_tb;
 		// mst.w m2, [C_BASE], stride=16
 		issue_and_commit(enc_mst_w(3'd2), C_BASE, ROW_STRIDE, 4'd5);
 
-		wait (completed_results >= 5);
+		wait (completed_results >= 3);
 		repeat (10) @(posedge clk_i);
 
 		$display("\n[TB] Input matrix A row-major (from memory @ 0x%08x):", A_BASE);
@@ -330,6 +333,9 @@ module quadrilatero_xif_tb;
 			);
 		end
 
+		wait (completed_results >= 5);
+		repeat (10) @(posedge clk_i);
+
 		$display("\n[TB] Result matrix C row-major (from memory @ 0x%08x):", C_BASE);
 		for (r = 0; r < 4; r = r + 1) begin
 			logic [127:0] rowC;
@@ -348,7 +354,7 @@ module quadrilatero_xif_tb;
 		issue_and_commit(enc_mst_w(3'd2), C_BASE, ROW_STRIDE, 4'd7);
 
 		$display("");
-		wait (completed_results >= 6);
+		wait (completed_results >= 7);
 		repeat (10) @(posedge clk_i);
 
 		$display("\n[TB] Result matrix C After Zeroing (from memory @ 0x%08x):", C_BASE);

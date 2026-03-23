@@ -44,6 +44,7 @@ package quadrilatero_pkg;
     logic [32-1:0]                  stride;
     logic [32-1:0]                  addr;
     logic [$clog2(N_REGS)-1:0]      operand_reg;
+    logic [$clog2(N_REGS)-1:0]      index_reg;
     logic [xif_pkg::X_ID_WIDTH-1:0] id;
     logic                           is_store;
     logic                           is_dense;
