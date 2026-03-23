@@ -748,7 +748,9 @@ module quadrilatero
     lsu_ctrl_dispatched_instr.operand_reg = (dispatcher_is_store_out) ? dispatcher_reg_ms1: dispatcher_reg_md;  // destination register
 
     // DEBUG PRINT (REMOVE LATER)
+    /*
     $display("LSU BLOCK DEBUG: instr_id=%0d, is_sparse_i=%b", lsu_ctrl_issued_instr.id, lsu_ctrl_issued_instr.is_sparse);
+    */
 
     // FIX THIS : extract from CSR
     lsu_ctrl_csr_config.n_col_bytes = quadrilatero_pkg::RLEN / 8       ;  // all bytes
@@ -830,6 +832,7 @@ module quadrilatero
       .instr_id_i           (lsu_ctrl_issued_instr.id               ),  // id of the instruction
       .start_i              (lsu_ctrl_start                         ),  // start loading
       .write_i              (lsu_ctrl_issued_instr.is_store         ),
+      .is_sparse_i          (lsu_ctrl_issued_instr.is_sparse        ),
 
       // Coming from CSR
       .n_bytes_cols_i       (lsu_ctrl_issued_instr_conf.n_col_bytes ),

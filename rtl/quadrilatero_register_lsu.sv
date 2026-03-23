@@ -49,6 +49,7 @@ module quadrilatero_register_lsu #(
     // Configuration Signals
     input  logic                           start_i            ,  // start loading: MUST BE A PULSE
     input  logic                           write_i            ,
+    input  logic                           is_sparse_i        ,
     output logic                           busy_o             ,
     input  logic [                   31:0] stride_i           ,  // stride value
     input  logic [                   31:0] address_i          ,  // address value
@@ -122,15 +123,35 @@ module quadrilatero_register_lsu #(
     finished   = (write_q & terminate) | (~write_q & wlast_o & wready_i);
   end
   
+  logic [RLEN-1:0] csr_row_data; //temporary row with packed non-zero values + col indices
+  logic [7:0]      value; // holds individual elements
+  logic [31:0]     csr_idx; // pointer inside csr_row_data for next non-zero
+  integer          i;       // loop index
 
   always_comb begin: write_to_RF
     data_mask     = '1 << (8 * n_bytes_cols_i);  // SPEC says to load zeros outside of rows and cols
 
+    if (is_sparse_i && load_fifo_data_available) begin
+        csr_row_data = '0;
+        csr_idx = 0;
+        for (i = 0; i < n_bytes_cols_i; i++) begin
+            value = load_fifo_data[8*i +: 8];
+            if (value != 0) begin // zero skipping
+              csr_row_data[csr_idx*16 +: 8] = value;
+              csr_row_data[csr_idx*16 + 8 +: 8] = i;
+              csr_idx++;
+            end
+        end
+        wdata_o = csr_row_data;
+        $display("Sparse LSU write: instr_id=%0d, row=%0d, wdata=%h", instr_id_i, counter_q, load_fifo_data);
+    end else begin
+        wdata_o = load_fifo_data & ~data_mask;
+    end
+  
     we_o          = load_fifo_data_available &~ mask_req;
     waddr_o       = waddr_q;
     wrowaddr_o    = counter_q       ;
-    wdata_o       = load_fifo_data & ~data_mask;
-    wlast_o       = (counter_q == $clog2(N_ROWS)'(N_ROWS - 1)) && we_o && wready_i;  
+    wlast_o       = (counter_q == $clog2(N_ROWS)'(N_ROWS - 1)) && we_o && wready_i;
     // wlast_o       = (counter_q == $clog2(N_ROWS)'(N_ROWS - 1)) & wready_i;
   end
 
