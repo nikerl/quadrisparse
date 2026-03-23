@@ -46,7 +46,7 @@ package quadrilatero_pkg;
     logic [$clog2(N_REGS)-1:0]      operand_reg;
     logic [xif_pkg::X_ID_WIDTH-1:0] id;
     logic                           is_store;
-    //logic is_sparse;
+    logic                           is_sparse;
   } lsu_instr_t;
 
   typedef struct packed {

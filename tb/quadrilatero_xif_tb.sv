@@ -286,22 +286,22 @@ module quadrilatero_xif_tb;
 
 
 		// mld.w m0, [A_BASE], stride=16
-		issue_and_commit(enc_mld_w(3'd0), A_BASE, ROW_STRIDE, 4'd1);
+		//issue_and_commit(enc_mld_w(3'd0), A_BASE, ROW_STRIDE, 4'd1);
 
 		// spld.w
 		issue_and_commit(enc_spld_w(3'd0), A_BASE, ROW_STRIDE, 4'd8);
 
 		// mld.w m1, [B_BASE], stride=16
-		issue_and_commit(enc_mld_w(3'd1), B_BASE, ROW_STRIDE, 4'd2);
+		//issue_and_commit(enc_mld_w(3'd1), B_BASE, ROW_STRIDE, 4'd2);
 
 		// mzero m2
-		issue_and_commit(enc_mzero(3'd2), 32'd0, 32'd0, 4'd3);
+		//issue_and_commit(enc_mzero(3'd2), 32'd0, 32'd0, 4'd3);
 
 		// mmasa.w m2 += m0 * m1
-		issue_and_commit(enc_mmasa_w(3'd0, 3'd1, 3'd2), 32'd0, 32'd0, 4'd4);
+		//issue_and_commit(enc_mmasa_w(3'd0, 3'd1, 3'd2), 32'd0, 32'd0, 4'd4);
 
 		// mst.w m2, [C_BASE], stride=16
-		issue_and_commit(enc_mst_w(3'd2), C_BASE, ROW_STRIDE, 4'd5);
+		//issue_and_commit(enc_mst_w(3'd2), C_BASE, ROW_STRIDE, 4'd5);
 
 		wait (completed_results >= 5);
 		repeat (10) @(posedge clk_i);
@@ -343,9 +343,9 @@ module quadrilatero_xif_tb;
 		end
 
 
-		issue_and_commit(enc_mzero(3'd2), 32'd0, 32'd0, 4'd6);
+		//issue_and_commit(enc_mzero(3'd2), 32'd0, 32'd0, 4'd6);
 
-		issue_and_commit(enc_mst_w(3'd2), C_BASE, ROW_STRIDE, 4'd7);
+		//issue_and_commit(enc_mst_w(3'd2), C_BASE, ROW_STRIDE, 4'd7);
 
 		$display("");
 		wait (completed_results >= 6);

@@ -91,6 +91,7 @@ module quadrilatero
   logic                                                                                decoder_rf_writeback          ;
   logic                                                                                decoder_instr_valid           ;
   logic                                                                                decoder_is_store_out          ;
+  logic                                                                                decoder_is_sparse_out         ;
   logic                                                                                decoder_is_float_out          ;
   quadrilatero_pkg::execution_units_t                                                    decoder_exec_unit             ;
   quadrilatero_pkg::datatype_t                                                           decoder_datatype_out          ;
@@ -100,6 +101,7 @@ module quadrilatero
   // Dispatcher
   logic                                                                                         dispatcher_rf_writeback          ;
   logic                                                                                         dispatcher_is_store_out          ;
+  logic                                                                                         dispatcher_is_sparse_out         ;
   logic                                                                                         dispatcher_is_float_out          ;
   logic                                                                                         dispatcher_instr_valid           ;
   logic                                                                                         dispatcher_instr_ready           ;
@@ -418,6 +420,7 @@ module quadrilatero
       .instr_valid_o             (decoder_instr_valid           ),
       .datatype_o                (decoder_datatype_out          ),
       .is_store_o                (decoder_is_store_out          ),
+      .is_sparse_o               (decoder_is_sparse_out         ),    
       .is_float_o                (decoder_is_float_out          )
   );
 
@@ -471,6 +474,7 @@ module quadrilatero
       .n_matrix_operands_read_i   (dispatcher_n_matrix_operands_read),  // how many reads to RF
       .datatype_i                 (decoder_datatype_out             ),
       .is_store_i                 (decoder_is_store_out             ),
+      .is_sparse_i                (decoder_is_sparse_out            ),       
       .is_float_i                 (decoder_is_float_out             ),
       .rf_read_regs_i             (dispatcher_rf_read_regs          ),  // which registers to read from 
       .rf_writeback_i             (dispatcher_rf_writeback          ),  // whether we need to write to the register file
@@ -482,6 +486,7 @@ module quadrilatero
       .instr_id_o                 (dispatcher_instr_id_out          ),
       .datatype_o                 (dispatcher_instr_datatype_out    ),
       .is_store_o                 (dispatcher_is_store_out          ),
+      .is_sparse_o                (dispatcher_is_sparse_out         ), 
       .is_float_o                 (dispatcher_is_float_out          ),
       .reg_ms1_o                  (dispatcher_reg_ms1               ),
       .reg_ms2_o                  (dispatcher_reg_ms2               ),
@@ -739,7 +744,11 @@ module quadrilatero
     lsu_ctrl_dispatched_instr.addr        = dispatcher_rs_out[0]                                             ;
     lsu_ctrl_dispatched_instr.id          = dispatcher_instr_id_out                                          ;  // instruction id
     lsu_ctrl_dispatched_instr.is_store    = dispatcher_is_store_out                                          ;
+    lsu_ctrl_dispatched_instr.is_sparse   = dispatcher_is_sparse_out                                         ;
     lsu_ctrl_dispatched_instr.operand_reg = (dispatcher_is_store_out) ? dispatcher_reg_ms1: dispatcher_reg_md;  // destination register
+
+    // DEBUG PRINT (REMOVE LATER)
+    $display("LSU BLOCK DEBUG: instr_id=%0d, is_sparse_i=%b", lsu_ctrl_issued_instr.id, lsu_ctrl_issued_instr.is_sparse);
 
     // FIX THIS : extract from CSR
     lsu_ctrl_csr_config.n_col_bytes = quadrilatero_pkg::RLEN / 8       ;  // all bytes

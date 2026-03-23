@@ -305,7 +305,7 @@ module quadrilatero_dispatcher #(
       state_q         <= state_d        ;
     end
   end
-
+  
   // Output assignments
   assign instr_ready_o = instr_ready;
   assign dispatch_o    = dispatch_q;
