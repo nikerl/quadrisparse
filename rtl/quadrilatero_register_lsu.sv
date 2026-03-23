@@ -49,6 +49,7 @@ module quadrilatero_register_lsu #(
     // Configuration Signals
     input  logic                           start_i            ,  // start loading: MUST BE A PULSE
     input  logic                           write_i            ,
+    input  logic                           is_dense_i         ,
     output logic                           busy_o             ,
     input  logic [                   31:0] stride_i           ,  // stride value
     input  logic [                   31:0] address_i          ,  // address value
@@ -272,6 +273,15 @@ module quadrilatero_register_lsu #(
       end
     end
   end
+
+`ifndef SYNTHESIS
+  // Skeleton hook for new dense-load path visibility.
+  always_ff @(posedge clk_i) begin
+    if (rst_ni && start_i && is_dense_i) begin
+      $display("[LSU] dense instruction start: id=%0d addr=0x%08h stride=%0d dst_reg=%0d is_store=%0b", instr_id_i, address_i, stride_i, operand_reg_i, write_i);
+    end
+  end
+`endif
   //---------------------
 
   // Assertions
