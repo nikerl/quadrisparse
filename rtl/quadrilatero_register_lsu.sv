@@ -123,36 +123,79 @@ module quadrilatero_register_lsu #(
     finished   = (write_q & terminate) | (~write_q & wlast_o & wready_i);
   end
   
-  logic [RLEN-1:0] csr_row_data; //temporary row with packed non-zero values + col indices
+  // Note: Each matrix row can hold 16 elements
+  logic [RLEN-1:0] csr_val_row; // temporary buffer that holds the non-zeroes
+  logic [RLEN-1:0] csr_indices_row; // temporary buffer that holds the indices
   logic [7:0]      value; // holds individual elements
   logic [31:0]     csr_idx; // pointer inside csr_row_data for next non-zero
+  logic            write_phase_q, write_phase_d; // phase toggling
   integer          i;       // loop index
+  integer          j;       // dynamic slicing index
+
 
   always_comb begin: write_to_RF
-    data_mask     = '1 << (8 * n_bytes_cols_i);  // SPEC says to load zeros outside of rows and cols
+      data_mask = '1 << (8 * n_bytes_cols_i);
 
-    if (is_sparse_i && load_fifo_data_available) begin
-        csr_row_data = '0;
-        csr_idx = 0;
-        for (i = 0; i < n_bytes_cols_i; i++) begin
-            value = load_fifo_data[8*i +: 8];
-            if (value != 0) begin // zero skipping
-              csr_row_data[csr_idx*16 +: 8] = value;
-              csr_row_data[csr_idx*16 + 8 +: 8] = i;
-              csr_idx++;
-            end
-        end
-        wdata_o = csr_row_data;
-        $display("Sparse LSU write: instr_id=%0d, row=%0d, wdata=%h", instr_id_i, counter_q, load_fifo_data);
-    end else begin
-        wdata_o = load_fifo_data & ~data_mask;
-    end
-  
-    we_o          = load_fifo_data_available &~ mask_req;
-    waddr_o       = waddr_q;
-    wrowaddr_o    = counter_q       ;
-    wlast_o       = (counter_q == $clog2(N_ROWS)'(N_ROWS - 1)) && we_o && wready_i;
-    // wlast_o       = (counter_q == $clog2(N_ROWS)'(N_ROWS - 1)) & wready_i;
+      csr_val_row     = '0;
+      csr_indices_row = '0;
+      csr_idx         = 0;
+      // Defaults
+      wdata_o    = load_fifo_data & ~data_mask;
+      wrowaddr_o = counter_q;
+
+      if (is_sparse_i && load_fifo_data_available) begin
+
+          // Extract non-zeroes
+          for (i = 0; i < n_bytes_cols_i; i++) begin
+              value = load_fifo_data[8*i +: 8];
+              if (value != 0) begin
+                  csr_val_row[csr_idx*8 +: 8]     = value;
+                  csr_indices_row[csr_idx*8 +: 8] = i[7:0];
+                  csr_idx++;
+              end
+          end
+
+          if (write_phase_q == 0) begin
+              wdata_o    = csr_val_row;
+              wrowaddr_o = counter_q;
+          end else begin
+              // Reset the full row
+              wdata_o = '0;
+              // Assign each valid index individually
+              for (j = 0; j < csr_idx; j++) begin
+                  wdata_o[8*j +: 8] = csr_indices_row[8*j +: 8];
+              end
+              wrowaddr_o = counter_q + 1;
+          end
+
+          //$display("Counter Increment: phase=%0b, counter_q=%0d", write_phase_q, counter_q);
+          $display("LSU Debug: instr_id=%0d, phase=%0b, counter_q=%0d, wrowaddr_o=%0d, we_o=%0b, wdata_o=%h, load_fifo_data_available=%0b", 
+                  instr_id_i, write_phase_q, counter_q, wrowaddr_o, we_o, wdata_o, load_fifo_data_available);
+      end
+
+      if (is_sparse_i) begin
+          we_o = (load_fifo_data_available && write_phase_q == 0) || (write_phase_q == 1);
+      end else begin
+          we_o = load_fifo_data_available & ~mask_req;
+      end
+
+      waddr_o = waddr_q;
+      wlast_o = (counter_q == $clog2(N_ROWS)'(N_ROWS - 1)) &&
+                we_o && wready_i;
+  end
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+      if (!rst_ni) begin
+          counter_q     <= 0;
+          write_phase_q <= 0;
+      end else if (load_fifo_data_available) begin
+          if (write_phase_q == 0) begin
+              write_phase_q <= 1;
+          end else begin
+              counter_q     <= counter_q + 2;  // next row
+              write_phase_q <= 0;
+          end
+      end
   end
 
   always_comb begin: read_from_RF
@@ -230,6 +273,7 @@ module quadrilatero_register_lsu #(
       lsu_busy_q <= busy;
       src_ptr_q  <= src_ptr_d;
       stride_q   <= stride_d ;
+      write_phase_q <= write_phase_d;
     end
   end
 
