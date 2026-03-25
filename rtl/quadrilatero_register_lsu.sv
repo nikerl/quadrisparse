@@ -210,7 +210,6 @@ module quadrilatero_register_lsu #(
   
 
   always_comb begin: next_value
-
     // - SPARSE CONTROL -
     if (is_sparse_i) begin
         write_phase_d = write_phase_q;
@@ -218,16 +217,16 @@ module quadrilatero_register_lsu #(
 
         if (load_fifo_data_available) begin
             if (write_phase_q == 0) begin
-                write_phase_d = 1; // values → indices
+                write_phase_d = 1; 
             end else begin
                 write_phase_d = 0;
-                counter_d     = counter_q + 2; // next pair of rows
+                counter_d     = counter_q + 2;
             end
         end
 
     end else begin
-        // - ORIGINAL CONTROL -
-        if (rlast_o || wlast_o || !is_sparse_i) begin
+    // - ORIGINAL CONTROL -
+        if (rlast_o || wlast_o) begin
             counter_d = '0;
         end else if ((we_o && wready_i) || (rdata_valid_i && rdata_ready_o && !rlast_o)) begin
             counter_d = counter_q + 1;
