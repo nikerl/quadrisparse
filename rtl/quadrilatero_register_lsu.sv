@@ -165,14 +165,6 @@ module quadrilatero_register_lsu #(
           end
 
           we_o = 1;
-          if (we_o) begin
-              $display("\n=== MATRIX REGISTER SNAPSHOT ===");
-              $write("Values Row 1 : ");
-              for (k = 0; k < csr_idx; k++) $write("%0d ", csr_val_row[8*k +: 8]);
-              $write("\nIndices Row 2: ");
-              for (k = 0; k < csr_idx; k++) $write("%0d ", csr_indices_row[8*k +: 8]);
-              $write("\n===============================\n");
-          end
       end else begin
           we_o = load_fifo_data_available & ~mask_req;
           wdata_o    = load_fifo_data & ~data_mask;
