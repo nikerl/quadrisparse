@@ -286,10 +286,10 @@ module quadrilatero_xif_tb;
 
 
 		// mld.w m0, [A_BASE], stride=16
-		//issue_and_commit(enc_mld_w(3'd0), A_BASE, ROW_STRIDE, 4'd1);
+		issue_and_commit(enc_mld_w(3'd0), A_BASE, ROW_STRIDE, 4'd1);
 
 		// spld.w
-		issue_and_commit(enc_spld_w(3'd0), A_BASE, ROW_STRIDE, 4'd8);
+		//issue_and_commit(enc_spld_w(3'd0), A_BASE, ROW_STRIDE, 4'd8);
 
 		// mld.w m1, [B_BASE], stride=16
 		//issue_and_commit(enc_mld_w(3'd1), B_BASE, ROW_STRIDE, 4'd2);
@@ -305,6 +305,18 @@ module quadrilatero_xif_tb;
 
 		wait (completed_results >= 5);
 		repeat (10) @(posedge clk_i);
+
+		$display("\n[TB] Matrix register m0 dumped to memory (sparse instruction): ");
+		for (r = 0; r < 4; r = r + 1) begin
+			logic [127:0] row;
+			row = mem_model[(C_BASE >> 4) + r];
+			$display("[TB] %0d %0d %0d %0d",
+				$signed(row[31:0]),
+				$signed(row[63:32]),
+				$signed(row[95:64]),
+				$signed(row[127:96])
+			);
+		end
 
 		$display("\n[TB] Input matrix A row-major (from memory @ 0x%08x):", A_BASE);
 		for (r = 0; r < 4; r = r + 1) begin

@@ -149,7 +149,7 @@ module quadrilatero_register_lsu #(
               value = load_fifo_data[8*i +: 8];
               if (value != 0) begin
                   csr_val_row[csr_idx*8 +: 8]     = value;
-                  csr_indices_row[csr_idx*8 +: 8] = csr_idx; // store column index
+                  csr_indices_row[csr_idx*8 +: 8] = i / 4; // divide with byte offset
                   csr_idx++;
               end
           end
@@ -180,7 +180,7 @@ module quadrilatero_register_lsu #(
       end
 
       waddr_o = waddr_q;
-      wlast_o = (!is_sparse_i) && (counter_q == $clog2(N_ROWS)'(N_ROWS - 1)) && we_o && wready_i;
+      wlast_o = (counter_q == $clog2(N_ROWS)-1) && we_o && wready_i;
   end
 
   always_comb begin: read_from_RF
