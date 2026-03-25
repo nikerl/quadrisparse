@@ -149,11 +149,7 @@ module quadrilatero_register_lsu #(
     waddr_o    = waddr_q;
     wrowaddr_o = counter_q;
     wdata_o    = load_fifo_data & ~data_mask;
-
-    // Correct wlast condition
     wlast_o = (counter_q == (N_ROWS - 1)) && we_o && wready_i;
-
-    // Sparse handling
     if (is_sparse_i && load_fifo_data_available) begin
         csr_val_row     = '0;
         csr_indices_row = '0;
@@ -163,21 +159,22 @@ module quadrilatero_register_lsu #(
             value = load_fifo_data[8*i +: 8];
             if (value != 0) begin
                 csr_val_row[csr_idx*8 +: 8]     = value;
-                csr_indices_row[csr_idx*8 +: 8] = i / 4; // convert byte offset → element index
+                csr_indices_row[csr_idx*8 +: 8] = i / 4; // byte offset
                 csr_idx++;
             end
         end
 
         if (write_phase_q == 0) begin
             // write values row
-            wdata_o    = csr_val_row;
-            wrowaddr_o = counter_q;       // use counter_q so each row of A maps to a unique row
-        end else begin
-            // write indices row
-            wdata_o    = '0;
+            wdata_o = '0;
             for (j = 0; j < csr_idx; j++)
-                wdata_o[8*j +: 8] = csr_indices_row[8*j +: 8];
-            wrowaddr_o = counter_q + 1;   // indices row follows values row
+                wdata_o[32*j +: 32] = {24'b0, csr_val_row[8*j +: 8]}; // padding
+            wrowaddr_o = 2*counter_q;
+        end else begin
+            // wdata_o = '0;
+            for (j = 0; j < csr_idx; j++)
+                wdata_o[32*j +: 32] = {24'b0, csr_indices_row[8*j +: 8]};
+            wrowaddr_o = 2*counter_q + 1;
         end
     end
   end
@@ -215,9 +212,9 @@ module quadrilatero_register_lsu #(
     if (is_sparse_i) begin
         if (load_fifo_data_available) begin
             if (write_phase_q == 0)
-                write_phase_d = 1;  // move to indices phase
+                write_phase_d = 1;
             else begin
-                write_phase_d = 0;  // next row
+                write_phase_d = 0; 
                 counter_d = counter_q + 2;
             end
         end

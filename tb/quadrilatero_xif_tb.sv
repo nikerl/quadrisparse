@@ -289,22 +289,24 @@ module quadrilatero_xif_tb;
 		// mld.w m0, [A_BASE], stride=16
 		//issue_and_commit(enc_mld_w(3'd0), A_BASE, ROW_STRIDE, 4'd1);
 
+		// spld.w m0, [A_BASE], stride=16
+		issue_and_commit(enc_spld_w(3'd0), A_BASE, ROW_STRIDE, 4'd8);
+		wait (completed_results >= 1); // make sure SPLD is fully done
+		repeat (10) @(posedge clk_i);   // optional small delay for safety
+
 		// mld.w m1, [B_BASE], stride=16
-		//issue_and_commit(enc_mld_w(3'd1), B_BASE, ROW_STRIDE, 4'd2);
+		issue_and_commit(enc_mld_w(3'd1), B_BASE, ROW_STRIDE, 4'd2);
 
 		// mzero m2
-		//issue_and_commit(enc_mzero(3'd2), 32'd0, 32'd0, 4'd3);
+		issue_and_commit(enc_mzero(3'd2), 32'd0, 32'd0, 4'd3);
 
 		// mmasa.w m2 += m0 * m1
-		//issue_and_commit(enc_mmasa_w(3'd0, 3'd1, 3'd2), 32'd0, 32'd0, 4'd4);
+		issue_and_commit(enc_mmasa_w(3'd0, 3'd1, 3'd2), 32'd0, 32'd0, 4'd4);
 
 		// mst.w m2, [C_BASE], stride=16
-		//issue_and_commit(enc_mst_w(3'd2), C_BASE, ROW_STRIDE, 4'd5);
+		issue_and_commit(enc_mst_w(3'd2), C_BASE, ROW_STRIDE, 4'd5);
 
-		// Issue SPLD
-		issue_and_commit(enc_spld_w(3'd0), A_BASE, ROW_STRIDE, 4'd8);
-
-		wait (completed_results >= 1);
+		wait (completed_results >= 5);
 		repeat (10) @(posedge clk_i);
 		/*
 		$display("\n[TB] Input matrix A row-major (from memory @ 0x%08x):", A_BASE);
@@ -318,7 +320,7 @@ module quadrilatero_xif_tb;
 				$signed(rowA[127:96])
 			);
 		end
-
+		*/
 		$display("\n[TB] Input matrix B col-major (from memory @ 0x%08x):", B_BASE);
 		for (r = 0; r < 4; r = r + 1) begin
 			logic [127:0] rowB;
@@ -330,7 +332,7 @@ module quadrilatero_xif_tb;
 				$signed(rowB[127:96])
 			);
 		end
-
+		
 		$display("\n[TB] Result matrix C row-major (from memory @ 0x%08x):", C_BASE);
 		for (r = 0; r < 4; r = r + 1) begin
 			logic [127:0] rowC;
@@ -342,14 +344,14 @@ module quadrilatero_xif_tb;
 				$signed(rowC[127:96])
 			);
 		end
-		*/
+		
 
 		issue_and_commit(enc_mzero(3'd2), 32'd0, 32'd0, 4'd6);
 
 		issue_and_commit(enc_mst_w(3'd2), C_BASE, ROW_STRIDE, 4'd7);
 
 		$display("");
-		wait (completed_results >= 2);
+		wait (completed_results >= 6);
 		repeat (10) @(posedge clk_i);
 
 		
