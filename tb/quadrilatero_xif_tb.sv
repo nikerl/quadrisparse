@@ -1,3 +1,10 @@
+// Copyright 2026
+// Solderpad Hardware License, Version 2.1,see LICENSE.md for details.
+// SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+//
+// Author: Nik Erlandsson
+// Author: Oskar Swärd
+
 `timescale 1ns/1ps
 
 module quadrilatero_xif_tb;
@@ -53,6 +60,16 @@ module quadrilatero_xif_tb;
 
 	int unsigned completed_results;
 	integer r;
+
+	// Cycle tracking for latency analysis
+	longint unsigned cycle_count = 0;
+
+	typedef struct {
+		longint unsigned issue_cycle;
+		longint unsigned complete_cycle;
+	} instr_timing_t;
+
+	instr_timing_t instr_timing [bit[$clog2($size(x_issue_req.id)*8)-1:0]];
 
 	function automatic logic [31:0] enc_mld_w(input logic [2:0] md);
 		logic [31:0] instr;
@@ -164,10 +181,14 @@ module quadrilatero_xif_tb;
 	  return {e3, e2, e1, e0};
 	endfunction
 
-	// Clock generation
+	// Clock generation and cycle counting
 	initial begin
 		clk_i = 1'b0;
 		forever #(CLK_PERIOD_NS/2) clk_i = ~clk_i;
+	end
+
+	always @(posedge clk_i) begin
+		cycle_count <= cycle_count + 1;
 	end
 
 	// Simple memory model: one-cycle read response, immediate write acceptance.
@@ -209,7 +230,18 @@ module quadrilatero_xif_tb;
 			completed_results <= 0;
 		end else if (x_result_valid && x_result_ready) begin
 			completed_results <= completed_results + 1;
-			$display("[TB] completed instruction id=%0d", x_result.id);
+			instr_timing[x_result.id].complete_cycle = cycle_count;
+			$display("[TB] completed instruction id=%0d (cycle %0d, latency=%0d cycles)", 
+				x_result.id, cycle_count, 
+				instr_timing[x_result.id].complete_cycle - instr_timing[x_result.id].issue_cycle);
+		end
+	end
+
+	// Track issued instructions for latency
+	always @(posedge clk_i) begin
+		if (x_issue_valid && x_issue_ready) begin
+			instr_timing[x_issue_req.id].issue_cycle = cycle_count;
+			$display("[TB] issued instruction id=%0d (cycle %0d)", x_issue_req.id, cycle_count);
 		end
 	end
 
@@ -291,25 +323,37 @@ module quadrilatero_xif_tb;
 		repeat (4) @(posedge clk_i);
 
 
+		// ########### LOAD OPERAND MATRICIES ###########
 		// mld.w m0, [A_BASE], stride=16
 		issue_and_commit(enc_mld_w(3'd0), A_BASE, ROW_STRIDE, 4'd1);
+
+		wait (completed_results >= 1);
+		repeat (10) @(posedge clk_i);
 
 		// dld.w m1, [B_BASE], stride=16, index_reg=m0
 		issue_and_commit(enc_dld_w(3'd1, 3'd0), B_BASE, ROW_STRIDE, 4'd2);
 
+
+		// ########### PERFORM MATMUL ###########
 		// mzero m2
 		issue_and_commit(enc_mzero(3'd2), 32'd0, 32'd0, 4'd3);
 
 		// mmasa.w m2 += m0 * m1
 		issue_and_commit(enc_mmasa_w(3'd0, 3'd1, 3'd2), 32'd0, 32'd0, 4'd4);
 
-		// mst.w m2, [C_BASE], stride=16
-		issue_and_commit(enc_mst_w(3'd2), C_BASE, ROW_STRIDE, 4'd5);
 
-		wait (completed_results >= 3);
+		// ########### STORE RESULTS ###########
+		// mst.w m0, [BASE_ADDR], stride=16 
+		issue_and_commit(enc_mst_w(3'd0), A_BASE, ROW_STRIDE, 4'd5);
+		issue_and_commit(enc_mst_w(3'd1), B_BASE, ROW_STRIDE, 4'd6);
+		issue_and_commit(enc_mst_w(3'd2), C_BASE, ROW_STRIDE, 4'd7);
+
+		wait (completed_results >= 6);
 		repeat (10) @(posedge clk_i);
+		
 
-		$display("\n[TB] Input matrix A row-major (from memory @ 0x%08x):", A_BASE);
+
+		$display("\n[TB] Sparse matrix A (from memory @ 0x%08x):", A_BASE);
 		for (r = 0; r < 4; r = r + 1) begin
 			logic [127:0] rowA;
 			rowA = mem_model[(A_BASE >> 4) + r];
@@ -321,7 +365,7 @@ module quadrilatero_xif_tb;
 			);
 		end
 
-		$display("\n[TB] Input matrix B col-major (from memory @ 0x%08x):", B_BASE);
+		$display("\n[TB] Dense matrix B (from memory @ 0x%08x):", B_BASE);
 		for (r = 0; r < 4; r = r + 1) begin
 			logic [127:0] rowB;
 			rowB = mem_model[(B_BASE >> 4) + r];
@@ -333,31 +377,7 @@ module quadrilatero_xif_tb;
 			);
 		end
 
-		wait (completed_results >= 5);
-		repeat (10) @(posedge clk_i);
-
-		$display("\n[TB] Result matrix C row-major (from memory @ 0x%08x):", C_BASE);
-		for (r = 0; r < 4; r = r + 1) begin
-			logic [127:0] rowC;
-			rowC = mem_model[(C_BASE >> 4) + r];
-			$display("[TB] %0d %0d %0d %0d",
-				$signed(rowC[31:0]),
-				$signed(rowC[63:32]),
-				$signed(rowC[95:64]),
-				$signed(rowC[127:96])
-			);
-		end
-
-
-		issue_and_commit(enc_mzero(3'd2), 32'd0, 32'd0, 4'd6);
-
-		issue_and_commit(enc_mst_w(3'd2), C_BASE, ROW_STRIDE, 4'd7);
-
-		$display("");
-		wait (completed_results >= 7);
-		repeat (10) @(posedge clk_i);
-
-		$display("\n[TB] Result matrix C After Zeroing (from memory @ 0x%08x):", C_BASE);
+		$display("\n[TB] Result matrix C (from memory @ 0x%08x):", C_BASE);
 		for (r = 0; r < 4; r = r + 1) begin
 			logic [127:0] rowC;
 			rowC = mem_model[(C_BASE >> 4) + r];

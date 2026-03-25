@@ -18,6 +18,7 @@ sources:
   - rtl/include/quadrilatero_pkg.sv
   - rtl/quadrilatero.sv
   - rtl/quadrilatero_decoder.sv
+  - rtl/quadrilatero_dld.sv
   - rtl/quadrilatero_deskewer.sv
   - rtl/quadrilatero_dispatcher.sv
   - rtl/quadrilatero_ff_fs_dr_stage.sv
