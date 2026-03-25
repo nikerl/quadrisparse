@@ -1,3 +1,4 @@
 Bender.lock
 .bender/
 build/
+.vscode/
