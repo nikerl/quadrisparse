@@ -293,7 +293,7 @@ module quadrilatero_xif_tb;
 		issue_and_commit(enc_spld_w(3'd0), A_BASE, ROW_STRIDE, 4'd8);
 		wait (completed_results >= 1); // make sure SPLD is fully done
 		repeat (10) @(posedge clk_i);   // optional small delay for safety
-
+		
 		// mld.w m1, [B_BASE], stride=16
 		issue_and_commit(enc_mld_w(3'd1), B_BASE, ROW_STRIDE, 4'd2);
 
@@ -308,7 +308,6 @@ module quadrilatero_xif_tb;
 
 		wait (completed_results >= 5);
 		repeat (10) @(posedge clk_i);
-		/*
 		$display("\n[TB] Input matrix A row-major (from memory @ 0x%08x):", A_BASE);
 		for (r = 0; r < 4; r = r + 1) begin
 			logic [127:0] rowA;
@@ -320,7 +319,7 @@ module quadrilatero_xif_tb;
 				$signed(rowA[127:96])
 			);
 		end
-		*/
+		
 		$display("\n[TB] Input matrix B col-major (from memory @ 0x%08x):", B_BASE);
 		for (r = 0; r < 4; r = r + 1) begin
 			logic [127:0] rowB;
@@ -367,10 +366,8 @@ module quadrilatero_xif_tb;
 			);
 		end
 
-		
 		$finish;
 	end
-
 
 	initial begin
 		#50000ns;

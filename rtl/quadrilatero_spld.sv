@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
 //
 // Author: Oskar Swärd
-
+/*
 module quadrilatero_spld #(
     parameter int N_REGS = 8,
     parameter int DATA_WIDTH = 32
@@ -123,3 +123,4 @@ module quadrilatero_spld #(
     end
 
 endmodule
+*/

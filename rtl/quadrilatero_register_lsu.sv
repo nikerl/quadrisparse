@@ -166,7 +166,7 @@ module quadrilatero_register_lsu #(
 
         if (write_phase_q == 0) begin
             // write values row
-            wdata_o = '0;
+            //wdata_o = '0;
             for (j = 0; j < csr_idx; j++)
                 wdata_o[32*j +: 32] = {24'b0, csr_val_row[8*j +: 8]}; // padding
             wrowaddr_o = 2*counter_q;
@@ -188,11 +188,18 @@ module quadrilatero_register_lsu #(
   
   // ONLY FOR DEBUG -- REMOVE
   always_ff @(posedge clk_i) begin
+    /*
     if (is_sparse_i && load_fifo_data_available) begin
         $display("[SPLD DATA DEBUG] time=%0t instr_id=%0d phase=%0b wrow=%0d wdata=%032h finished=%0b",
                  $time, lsu_id_o, write_phase_q, wrowaddr_o, wdata_o, finished);
     end
+    */
+    if (wready_i) begin
+        $display("[RF WRITE OK] time=%0t reg=%0d row=%0d data=%032h",
+                 $time, waddr_o, wrowaddr_o, wdata_o);
+    end
   end
+
 
   always_comb begin: lsu_ctrl_block
     load_fifo_pop   = wready_i;
