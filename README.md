@@ -2,7 +2,7 @@
 
 `QuadriSparse` is a sparse dense matrix mulitplication (SpMM) accelerator and RISC-V ISA extention based on the matrix multiplication co-processor [Quadrilatero](https://github.com/pulp-platform/quadrilatero). It uses the CORE-V-X-IF interface to interface with `OpenHW Group` CPUs and the OBI protocol to interface with memories.
 
-This project was developed as part of a master thesis at Chalmers Univeristy of Technology. 
+This project was developed as part of a masters thesis at Chalmers Univeristy of Technology. 
 
 ## Dependencies
 - Verilator: SV simulator
