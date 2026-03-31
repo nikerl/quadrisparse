@@ -48,6 +48,7 @@ package quadrilatero_pkg;
     logic [xif_pkg::X_ID_WIDTH-1:0] id;
     logic                           is_store;
     logic                           is_dense;
+    logic                           is_sparse;
   } lsu_instr_t;
 
   typedef struct packed {

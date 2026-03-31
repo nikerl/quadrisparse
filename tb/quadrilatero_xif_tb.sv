@@ -15,6 +15,8 @@ module quadrilatero_xif_tb;
 	localparam logic [31:0] A_BASE = 32'h0000_0000;
 	localparam logic [31:0] B_BASE = 32'h0000_0100;
 	localparam logic [31:0] C_BASE = 32'h0000_0200;
+	localparam logic [31:0] VAL_BASE = 32'h0000_0300;
+	localparam logic [31:0] COL_BASE = 32'h0000_0400;
 	localparam logic [31:0] ROW_STRIDE = 32'd16;
 
 	logic clk_i;
@@ -122,6 +124,19 @@ module quadrilatero_xif_tb;
 			instr[14:12]  = 3'b000;
 			instr[11:7]   = 5'b00000;
 			instr[6:0]    = 7'b0101011;
+			return instr;
+		end
+	endfunction
+
+	function automatic logic [31:0] enc_spld_w(input logic [2:0] md);
+		logic [31:0] instr;
+		begin
+			instr         = '0;
+			instr[31:25]  = 7'b0010000; // funct7
+			instr[14:12]  = 3'b000;     // funct3
+			instr[11:10]  = 2'b10;
+			instr[9:7]    = md;         // destination reg
+			instr[6:0]    = 7'b0101011; // opcode
 			return instr;
 		end
 	endfunction
@@ -303,11 +318,6 @@ module quadrilatero_xif_tb;
 			mem_model[i] = '0;
 		end
 
-		// Simulated sparse matrix loaded into register.
-		mem_model[(A_BASE >> 4) + 0] = pack_row_lsb_first(32'd1, 32'd2, 32'd3, 32'd4);
-		mem_model[(A_BASE >> 4) + 1] = pack_row_lsb_first(32'd0, 32'd2, 32'd4, 32'd5);
-		mem_model[(A_BASE >> 4) + 2] = pack_row_lsb_first(32'd0, 32'd0, 32'd0, 32'd0);
-		mem_model[(A_BASE >> 4) + 3] = pack_row_lsb_first(32'd0, 32'd0, 32'd0, 32'd0);
 
 		// Dense matrix B, row-major.
 		mem_model[(B_BASE >> 4) + 0] = pack_row_lsb_first(32'd0, 32'd0, 32'd0, 32'd0);
@@ -318,6 +328,10 @@ module quadrilatero_xif_tb;
 		mem_model[(B_BASE >> 4) + 5] = pack_row_lsb_first(32'd5, 32'd5, 32'd5, 32'd5);
 		mem_model[(B_BASE >> 4) + 6] = pack_row_lsb_first(32'd6, 32'd6, 32'd6, 32'd6);
 
+		// Sparse tile: 4 non-zero values and their column indices (one SPLD fetch each)
+		mem_model[(VAL_BASE >> 4)] = pack_row_lsb_first(32'd1, 32'd4, 32'd6, 32'd9);
+		mem_model[(COL_BASE >> 4)] = pack_row_lsb_first(32'd0, 32'd3, 32'd1, 32'd2);
+
 		repeat (6) @(posedge clk_i);
 		rst_ni = 1'b1;
 		repeat (4) @(posedge clk_i);
@@ -325,13 +339,17 @@ module quadrilatero_xif_tb;
 
 		// ########### LOAD OPERAND MATRICIES ###########
 		// mld.w m0, [A_BASE], stride=16
-		issue_and_commit(enc_mld_w(3'd0), A_BASE, ROW_STRIDE, 4'd1);
+		
+		issue_and_commit(enc_spld_w(3'd0), VAL_BASE, COL_BASE, 4'd1);
 
-		wait (completed_results >= 1);
-		repeat (10) @(posedge clk_i);
+		wait (completed_results >= 1); // make sure SPLD is fully done
+		repeat (10) @(posedge clk_i);   // optional small delay for safety
 
 		// dld.w m1, [B_BASE], stride=16, index_reg=m0
 		issue_and_commit(enc_dld_w(3'd1, 3'd0), B_BASE, ROW_STRIDE, 4'd2);
+
+		wait (completed_results >= 2);
+		repeat (10) @(posedge clk_i);  
 
 
 		// ########### PERFORM MATMUL ###########
@@ -348,6 +366,7 @@ module quadrilatero_xif_tb;
 		issue_and_commit(enc_mst_w(3'd1), B_BASE, ROW_STRIDE, 4'd6);
 		issue_and_commit(enc_mst_w(3'd2), C_BASE, ROW_STRIDE, 4'd7);
 
+		// IDs 3 and 4 are currently disabled (mzero/mmasa), so expect 4 completions.
 		wait (completed_results >= 6);
 		repeat (10) @(posedge clk_i);
 		
@@ -389,10 +408,8 @@ module quadrilatero_xif_tb;
 			);
 		end
 
-		
 		$finish;
 	end
-
 
 	initial begin
 		#50000ns;

@@ -17,6 +17,7 @@ module quadrilatero_register_lsu #(
 ) (
     input  logic                          clk_i               ,
     input  logic                          rst_ni              ,
+    
 
     // Bus interface
     output logic                          data_req_o          ,
@@ -37,6 +38,7 @@ module quadrilatero_register_lsu #(
     output logic                          we_o                ,
     output logic                          wlast_o             ,
     input  logic                          wready_i            ,  // to stall the request in case the port is busy
+    input  logic                          is_sparse_i         ,
 
     // Register Read Port for store unit
     output logic [    $clog2(N_REGS)-1:0] raddr_o             ,
@@ -110,7 +112,6 @@ module quadrilatero_register_lsu #(
 
 
 
-
   logic [              31:0] src_ptr_d ;
   logic [              31:0] stride_d  ;
   logic [              31:0] src_ptr_q ;
@@ -118,22 +119,37 @@ module quadrilatero_register_lsu #(
   logic [              31:0] src_ptr   ;
   logic [              31:0] stride    ;
 
+  logic [$clog2(N_ROWS+1)-1:0] sparse_done_cnt_q;
+  logic [$clog2(N_ROWS+1)-1:0] sparse_done_cnt_d;
+
   assign mask_req     = (counter_q == $clog2(N_ROWS)'(N_ROWS - 1)) & finished_o & ~finished_ack_i;
   always_comb begin
     lsu_id_o   = (write_i &~ load_fifo_data_available) ? instr_id_i : back_id_q;
-    finished   = (write_q & terminate) | (~write_q & wlast_o & wready_i);
+
+    if (is_sparse_i) begin
+        finished = wlast_o;
+    end else begin
+        finished = (write_q & terminate) | (~write_q & wlast_o & wready_i);
+    end
   end
-  
+
 
   always_comb begin: write_to_RF
-    data_mask     = '1 << (8 * n_bytes_cols_i);  // SPEC says to load zeros outside of rows and cols
+      // Default assignments
+    data_mask  = '1 << (8 * n_bytes_cols_i);
 
-    we_o          = load_fifo_data_available &~ mask_req;
-    waddr_o       = waddr_q;
-    wrowaddr_o    = counter_q       ;
-    wdata_o       = load_fifo_data & ~data_mask;
-    wlast_o       = (counter_q == $clog2(N_ROWS)'(N_ROWS - 1)) && we_o && wready_i;  
-    // wlast_o       = (counter_q == $clog2(N_ROWS)'(N_ROWS - 1)) & wready_i;
+    // For sparse padding rows (2-3): force we_o even when FIFO is empty
+    we_o       = (load_fifo_data_available | (is_sparse_i & counter_q[$clog2(N_ROWS)-1])) & ~mask_req;
+    waddr_o    = waddr_q;
+    wrowaddr_o = counter_q;
+    wdata_o    = load_fifo_data & ~data_mask;
+    // For sparse: both real rows and padding rows use the same counter limit as dense
+    wlast_o    = (counter_q == $clog2(N_ROWS)'(N_ROWS - 1)) && we_o && wready_i;
+    if (is_sparse_i) begin
+        wrowaddr_o = counter_q;
+        // rows 0-1: real FIFO data; rows 2-3: zero-pad to pop stale scoreboard entries
+        wdata_o = load_fifo_data_available ? load_fifo_data : '0;
+    end
   end
 
   always_comb begin: read_from_RF
@@ -142,6 +158,8 @@ module quadrilatero_register_lsu #(
     raddr_o       = operand_reg_i ;
     rlast_o       = (counter_q == $clog2(N_ROWS)'(N_ROWS - 1)) && rdata_valid_i && rdata_ready_o;   
   end
+  
+
 
   always_comb begin: lsu_ctrl_block
     load_fifo_pop   = wready_i;
@@ -149,41 +167,55 @@ module quadrilatero_register_lsu #(
     store_fifo_push = rdata_ready_o && rdata_valid_i;
     lsu_ready = store_fifo_empty | (write_i &~ load_fifo_data_available &~ lsu_busy_q);
     start  = (start_i | start_q) & lsu_ready;
-    //busy_o = (write_i ? busy_d : busy) | start_q;
     busy_o = (write_i ? busy_d : busy | (load_fifo_data_available & counter_d == '0)) | start_q;
-    
-    stride  = (start) ? stride_i  : stride_q;
+
+    // For sparse: stride is (col_base - val_base) so the inner LSU naturally
+    // fetches val_base on row 0 and col_base on row 1.
+    stride  = (start) ? (is_sparse_i ? (stride_i - address_i) : stride_i) : stride_q;
     src_ptr = (start) ? address_i : src_ptr_q;
   end
 
-  always_comb begin: next_value
-    if (rlast_o || wlast_o) begin
-      counter_d = '0;
-    end else if ((we_o && wready_i) || (rdata_valid_i && rdata_ready_o && !rlast_o)) begin
-      counter_d = counter_q + 1;
+   always_comb begin: next_value
+    // - SPARSE CONTROL -
+    if (is_sparse_i) begin
+        if (we_o && wready_i) begin
+            counter_d = wlast_o ? '0 : counter_q + 1;
+        end else begin
+            counter_d = counter_q;
+        end
     end else begin
-      counter_d = counter_q;
+    // - ORIGINAL CONTROL -
+        if (rlast_o || wlast_o) begin
+            counter_d = '0;
+        end else if ((we_o && wready_i) || (rdata_valid_i && rdata_ready_o && !rlast_o)) begin
+            counter_d = counter_q + 1;
+        end else begin
+            counter_d = counter_q;
+        end
+
     end
 
     write_d = (write_i && rlast_o && rdata_valid_i) ? 1'b1 :
               (!write_i && !busy)                   ? 1'b0 : write_q;
 
-    valid_d = (load_fifo_valid && counter_d==0 && ~valid_q) ? 1'b1 : 
-              (load_fifo_valid && counter_d==3 &&  valid_q) ? 1'b0 : valid_q;
+    valid_d = (load_fifo_valid && counter_d==0 && ~valid_q) ? 1'b1 :
+              (load_fifo_valid && counter_d==3 &&  valid_q) ? 1'b0 :
+              (is_sparse_i && wlast_o)                      ? 1'b0 : valid_q;
 
     start_d =  start              ? 1'b0 : 
               (start_q | start_i) ? 1'b1 : start_q;
 
-    stride_d   = (start) ? stride_i  : stride_q ;
+    stride_d   = (start) ? stride : stride_q;
     src_ptr_d  = (start) ? address_i : src_ptr_q;
 
     back_id_d = (load_fifo_valid && counter_d==0  && ~valid_q) ? instr_id_i    : 
                   rlast_o                                       ? lsu_id_o      : back_id_q;
 
-    waddr_d   = (load_fifo_valid && counter_d==0) ? operand_reg_i : waddr_q  ;
+    waddr_d   = (load_fifo_valid && counter_d==0) ? operand_reg_i : waddr_q;
 
     busy_d = (write_i && rlast_o && rdata_valid_i) ? 1'b0 :
              (write_i && start_i)                  ? 1'b1 : busy_q;
+
   end
 
   always_ff @(posedge clk_i or negedge rst_ni) begin: seq_block
@@ -242,7 +274,7 @@ module quadrilatero_register_lsu #(
       .src_ptr_i                    (src_ptr                    ),
       .stride_i                     (stride                     ),
       .cols_i                       (MAX_EL_PER_ROW             ),
-      .rows_i                       (n_rows_i                   ),
+      .rows_i                       (is_sparse_i ? 32'd2 : n_rows_i),
 
       // Output data
       .load_fifo_output_o           (load_fifo_data             ),

@@ -222,7 +222,8 @@ module quadrilatero_lsu #(
 
     load_fifo_alm_full = (load_fifo_usage == LastFifoUsage[Addr_Fifo_Depth-1:0]);
     load_fifo_input    = data_in_rdata;
-    load_fifo_push     = (rvalid & rd_valid_q & ~load_fifo_output_pop_i) | (rvalid & ~load_fifo_empty);
+    load_fifo_push     = ((rvalid & rd_valid_q & ~load_fifo_output_pop_i) | (rvalid & ~load_fifo_empty))
+               & (~load_fifo_full | load_fifo_pop);
     load_fifo_pop      = load_fifo_output_pop_i & ~load_fifo_empty;
 
     rd_valid_d     = (rvalid & ~rd_valid_q)      ? 1'b1 :  

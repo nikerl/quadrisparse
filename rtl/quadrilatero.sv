@@ -92,6 +92,7 @@ module quadrilatero
   logic                                                                                decoder_instr_valid           ;
   logic                                                                                decoder_is_store_out          ;
   logic                                                                                decoder_is_dense_out          ;
+  logic                                                                                decoder_is_sparse_out         ;
   logic                                                                                decoder_is_float_out          ;
   quadrilatero_pkg::execution_units_t                                                    decoder_exec_unit             ;
   quadrilatero_pkg::datatype_t                                                           decoder_datatype_out          ;
@@ -102,6 +103,7 @@ module quadrilatero
   logic                                                                                         dispatcher_rf_writeback          ;
   logic                                                                                         dispatcher_is_store_out          ;
   logic                                                                                         dispatcher_is_dense_out          ;
+  logic                                                                                         dispatcher_is_sparse_out         ;
   logic                                                                                         dispatcher_is_float_out          ;
   logic                                                                                         dispatcher_instr_valid           ;
   logic                                                                                         dispatcher_instr_ready           ;
@@ -483,7 +485,8 @@ module quadrilatero
       .instr_valid_o             (decoder_instr_valid           ),
       .datatype_o                (decoder_datatype_out          ),
       .is_store_o                (decoder_is_store_out          ),
-        .is_dense_o                (decoder_is_dense_out          ),
+      .is_dense_o                (decoder_is_dense_out          ),
+      .is_sparse_o               (decoder_is_sparse_out         ),    
       .is_float_o                (decoder_is_float_out          )
   );
 
@@ -538,6 +541,7 @@ module quadrilatero
       .datatype_i                 (decoder_datatype_out             ),
       .is_store_i                 (decoder_is_store_out             ),
       .is_dense_i                 (decoder_is_dense_out             ),
+      .is_sparse_i                (decoder_is_sparse_out            ),       
       .is_float_i                 (decoder_is_float_out             ),
       .rf_read_regs_i             (dispatcher_rf_read_regs          ),  // which registers to read from 
       .rf_writeback_i             (dispatcher_rf_writeback          ),  // whether we need to write to the register file
@@ -550,6 +554,7 @@ module quadrilatero
       .datatype_o                 (dispatcher_instr_datatype_out    ),
       .is_store_o                 (dispatcher_is_store_out          ),
       .is_dense_o                 (dispatcher_is_dense_out          ),
+      .is_sparse_o                (dispatcher_is_sparse_out         ), 
       .is_float_o                 (dispatcher_is_float_out          ),
       .reg_ms1_o                  (dispatcher_reg_ms1               ),
       .reg_ms2_o                  (dispatcher_reg_ms2               ),
@@ -818,6 +823,7 @@ module quadrilatero
     lsu_ctrl_dispatched_instr.id          = dispatcher_instr_id_out                                          ;  // instruction id
     lsu_ctrl_dispatched_instr.is_store    = dispatcher_is_store_out                                          ;
     lsu_ctrl_dispatched_instr.is_dense    = dispatcher_is_dense_out                                          ;
+    lsu_ctrl_dispatched_instr.is_sparse   = dispatcher_is_sparse_out                                         ;
     lsu_ctrl_dispatched_instr.operand_reg = (dispatcher_is_store_out) ? dispatcher_reg_ms1: dispatcher_reg_md;  // destination register
     lsu_ctrl_dispatched_instr.index_reg   = dispatcher_reg_ms1                                                ;  // source register for DLD row indices
 
@@ -951,6 +957,7 @@ module quadrilatero
       .start_i              (lsu_start                       ),  // start loading
       .write_i              (lsu_ctrl_issued_instr.is_store         ),
       .is_dense_i           (1'b0                                   ),
+      .is_sparse_i          (lsu_ctrl_issued_instr.is_sparse        ),
 
       // Coming from CSR
       .n_bytes_cols_i       (lsu_ctrl_issued_instr_conf.n_col_bytes ),
