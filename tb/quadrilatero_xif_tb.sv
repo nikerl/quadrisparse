@@ -90,7 +90,7 @@ module quadrilatero_xif_tb;
 		logic [31:0] instr;
 		begin
 			instr         = '0;
-			instr[31:25]  = 7'b0000010;
+			instr[31:25]  = 7'b0001000;
 			instr[17:15]  = msp;
 			instr[14:12]  = 3'b000;
 			instr[11:10]  = 2'b10;
