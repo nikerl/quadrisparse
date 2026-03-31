@@ -17,6 +17,8 @@ module quadrilatero_decoder
     output logic                                                                             rf_writeback_o          ,
     output logic                                                                             instr_valid_o           ,
     output logic                                                                             is_store_o              ,
+    output logic                                                                             is_dense_o              ,
+    output logic                                                                             is_sparse_o             ,
     output logic                                                                             is_float_o              ,
     output quadrilatero_pkg::execution_units_t                                                 exec_unit_o             ,
     output quadrilatero_pkg::datatype_t                                                        datatype_o
@@ -29,6 +31,8 @@ module quadrilatero_decoder
     rf_writeback_reg_o       = '0;
     datatype_o               = quadrilatero_pkg::SIZE_32;
     is_store_o               = '0;
+    is_dense_o               = '0;
+    is_sparse_o              = '0;
     n_matrix_operands_read_o = '0;
     rf_writeback_o           = '0;
     is_float_o               = 1'b0;
@@ -146,6 +150,26 @@ module quadrilatero_decoder
         rf_writeback_reg_o       = instr_i[9:7];
         datatype_o               = quadrilatero_pkg::SIZE_32;
         rf_writeback_o           = '1;
+      end
+      quadrilatero_instr_pkg::DLD_W: begin
+        instr_valid_o            = '1;
+        exec_unit_o              = quadrilatero_pkg::FU_LSU;
+        n_matrix_operands_read_o = 1;
+        rf_read_regs_o[0]        = instr_i[17:15];
+        rf_writeback_reg_o       = instr_i[9:7];
+        datatype_o               = quadrilatero_pkg::SIZE_32;
+        rf_writeback_o           = '1;
+        is_dense_o               = '1;
+      end
+      quadrilatero_instr_pkg::SPLD_W: begin
+        instr_valid_o            = '1;
+        exec_unit_o              = quadrilatero_pkg::FU_LSU;
+        rf_read_regs_o           = instr_i[20:18];
+        rf_writeback_reg_o       = instr_i[9:7];
+        datatype_o               = quadrilatero_pkg::SIZE_32;
+        rf_writeback_o           = '1;
+        is_sparse_o              = '1;
+        
       end
       /*
          quadrilatero_instr_pkg::MMOV_MM    : begin

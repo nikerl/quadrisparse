@@ -1,3 +1,8 @@
+# Bender stuff
 Bender.lock
 .bender/
 build/
+.vscode/
+
+# Python virtual environment
+venv/

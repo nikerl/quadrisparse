@@ -1,3 +1,10 @@
+// Copyright 2026
+// Solderpad Hardware License, Version 2.1,see LICENSE.md for details.
+// SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+//
+// Author: Nik Erlandsson
+// Author: Oskar Swärd
+
 `timescale 1ns/1ps
 
 module quadrilatero_xif_tb;
@@ -8,6 +15,8 @@ module quadrilatero_xif_tb;
 	localparam logic [31:0] A_BASE = 32'h0000_0000;
 	localparam logic [31:0] B_BASE = 32'h0000_0100;
 	localparam logic [31:0] C_BASE = 32'h0000_0200;
+	localparam logic [31:0] VAL_BASE = 32'h0000_0300;
+	localparam logic [31:0] COL_BASE = 32'h0000_0400;
 	localparam logic [31:0] ROW_STRIDE = 32'd16;
 
 	logic clk_i;
@@ -54,11 +63,37 @@ module quadrilatero_xif_tb;
 	int unsigned completed_results;
 	integer r;
 
+	// Cycle tracking for latency analysis
+	longint unsigned cycle_count = 0;
+
+	typedef struct {
+		longint unsigned issue_cycle;
+		longint unsigned complete_cycle;
+	} instr_timing_t;
+
+	instr_timing_t instr_timing [bit[$clog2($size(x_issue_req.id)*8)-1:0]];
+
 	function automatic logic [31:0] enc_mld_w(input logic [2:0] md);
 		logic [31:0] instr;
 		begin
 			instr         = '0;
 			instr[31:25]  = 7'b0000000;
+			instr[14:12]  = 3'b000;
+			instr[11:10]  = 2'b10;
+			instr[9:7]    = md;
+			instr[6:0]    = 7'b0101011;
+			return instr;
+		end
+	endfunction
+
+	// md: destination matrix register
+	// msp: the sparse matrix register containing the row incidices to load
+	function automatic logic [31:0] enc_dld_w(input logic [2:0] md, input logic [2:0] msp);
+		logic [31:0] instr;
+		begin
+			instr         = '0;
+			instr[31:25]  = 7'b0001000;
+			instr[17:15]  = msp;
 			instr[14:12]  = 3'b000;
 			instr[11:10]  = 2'b10;
 			instr[9:7]    = md;
@@ -89,6 +124,19 @@ module quadrilatero_xif_tb;
 			instr[14:12]  = 3'b000;
 			instr[11:7]   = 5'b00000;
 			instr[6:0]    = 7'b0101011;
+			return instr;
+		end
+	endfunction
+
+	function automatic logic [31:0] enc_spld_w(input logic [2:0] md);
+		logic [31:0] instr;
+		begin
+			instr         = '0;
+			instr[31:25]  = 7'b0010000; // funct7
+			instr[14:12]  = 3'b000;     // funct3
+			instr[11:10]  = 2'b10;
+			instr[9:7]    = md;         // destination reg
+			instr[6:0]    = 7'b0101011; // opcode
 			return instr;
 		end
 	endfunction
@@ -148,10 +196,14 @@ module quadrilatero_xif_tb;
 	  return {e3, e2, e1, e0};
 	endfunction
 
-	// Clock generation
+	// Clock generation and cycle counting
 	initial begin
 		clk_i = 1'b0;
 		forever #(CLK_PERIOD_NS/2) clk_i = ~clk_i;
+	end
+
+	always @(posedge clk_i) begin
+		cycle_count <= cycle_count + 1;
 	end
 
 	// Simple memory model: one-cycle read response, immediate write acceptance.
@@ -193,7 +245,18 @@ module quadrilatero_xif_tb;
 			completed_results <= 0;
 		end else if (x_result_valid && x_result_ready) begin
 			completed_results <= completed_results + 1;
-			$display("[TB] completed instruction id=%0d", x_result.id);
+			instr_timing[x_result.id].complete_cycle = cycle_count;
+			$display("[TB] completed instruction id=%0d (cycle %0d, latency=%0d cycles)", 
+				x_result.id, cycle_count, 
+				instr_timing[x_result.id].complete_cycle - instr_timing[x_result.id].issue_cycle);
+		end
+	end
+
+	// Track issued instructions for latency
+	always @(posedge clk_i) begin
+		if (x_issue_valid && x_issue_ready) begin
+			instr_timing[x_issue_req.id].issue_cycle = cycle_count;
+			$display("[TB] issued instruction id=%0d (cycle %0d)", x_issue_req.id, cycle_count);
 		end
 	end
 
@@ -255,42 +318,61 @@ module quadrilatero_xif_tb;
 			mem_model[i] = '0;
 		end
 
-		// Matrix A (4x4), row-major.
-		mem_model[(A_BASE >> 4) + 0] = pack_row_lsb_first(32'd1, 32'd2, 32'd3, 32'd4);
-		mem_model[(A_BASE >> 4) + 1] = pack_row_lsb_first(32'd5, 32'd6, 32'd7, 32'd8);
-		mem_model[(A_BASE >> 4) + 2] = pack_row_lsb_first(32'd9, 32'd10, 32'd11, 32'd12);
-		mem_model[(A_BASE >> 4) + 3] = pack_row_lsb_first(32'd13, 32'd14, 32'd15, 32'd16);
 
-		// Matrix B (4x4), col-major.
-		mem_model[(B_BASE >> 4) + 0] = pack_row_lsb_first(32'd1, 32'd5, 32'd9, 32'd13);
-		mem_model[(B_BASE >> 4) + 1] = pack_row_lsb_first(32'd2, 32'd6, 32'd10, 32'd14);
-		mem_model[(B_BASE >> 4) + 2] = pack_row_lsb_first(32'd3, 32'd7, 32'd11, 32'd15);
-		mem_model[(B_BASE >> 4) + 3] = pack_row_lsb_first(32'd4, 32'd8, 32'd12, 32'd16);
+		// Dense matrix B, row-major.
+		mem_model[(B_BASE >> 4) + 0] = pack_row_lsb_first(32'd0, 32'd0, 32'd0, 32'd0);
+		mem_model[(B_BASE >> 4) + 1] = pack_row_lsb_first(32'd1, 32'd1, 32'd1, 32'd1);
+		mem_model[(B_BASE >> 4) + 2] = pack_row_lsb_first(32'd2, 32'd2, 32'd2, 32'd2);
+		mem_model[(B_BASE >> 4) + 3] = pack_row_lsb_first(32'd3, 32'd3, 32'd3, 32'd3);
+		mem_model[(B_BASE >> 4) + 4] = pack_row_lsb_first(32'd4, 32'd4, 32'd4, 32'd4);
+		mem_model[(B_BASE >> 4) + 5] = pack_row_lsb_first(32'd5, 32'd5, 32'd5, 32'd5);
+		mem_model[(B_BASE >> 4) + 6] = pack_row_lsb_first(32'd6, 32'd6, 32'd6, 32'd6);
+
+		// Sparse tile: 4 non-zero values and their column indices (one SPLD fetch each)
+		mem_model[(VAL_BASE >> 4)] = pack_row_lsb_first(32'd1, 32'd4, 32'd6, 32'd9);
+		mem_model[(COL_BASE >> 4)] = pack_row_lsb_first(32'd0, 32'd3, 32'd1, 32'd2);
 
 		repeat (6) @(posedge clk_i);
 		rst_ni = 1'b1;
 		repeat (4) @(posedge clk_i);
 
 
+		// ########### LOAD OPERAND MATRICIES ###########
 		// mld.w m0, [A_BASE], stride=16
-		issue_and_commit(enc_mld_w(3'd0), A_BASE, ROW_STRIDE, 4'd1);
+		
+		issue_and_commit(enc_spld_w(3'd0), VAL_BASE, COL_BASE, 4'd1);
 
-		// mld.w m1, [B_BASE], stride=16
-		issue_and_commit(enc_mld_w(3'd1), B_BASE, ROW_STRIDE, 4'd2);
+		wait (completed_results >= 1); // make sure SPLD is fully done
+		repeat (10) @(posedge clk_i);   // optional small delay for safety
 
+		// dld.w m1, [B_BASE], stride=16, index_reg=m0
+		issue_and_commit(enc_dld_w(3'd1, 3'd0), B_BASE, ROW_STRIDE, 4'd2);
+
+		wait (completed_results >= 2);
+		repeat (10) @(posedge clk_i);  
+
+
+		// ########### PERFORM MATMUL ###########
 		// mzero m2
 		issue_and_commit(enc_mzero(3'd2), 32'd0, 32'd0, 4'd3);
 
 		// mmasa.w m2 += m0 * m1
 		issue_and_commit(enc_mmasa_w(3'd0, 3'd1, 3'd2), 32'd0, 32'd0, 4'd4);
 
-		// mst.w m2, [C_BASE], stride=16
-		issue_and_commit(enc_mst_w(3'd2), C_BASE, ROW_STRIDE, 4'd5);
 
-		wait (completed_results >= 5);
+		// ########### STORE RESULTS ###########
+		// mst.w m0, [BASE_ADDR], stride=16 
+		issue_and_commit(enc_mst_w(3'd0), A_BASE, ROW_STRIDE, 4'd5);
+		issue_and_commit(enc_mst_w(3'd1), B_BASE, ROW_STRIDE, 4'd6);
+		issue_and_commit(enc_mst_w(3'd2), C_BASE, ROW_STRIDE, 4'd7);
+
+		// IDs 3 and 4 are currently disabled (mzero/mmasa), so expect 4 completions.
+		wait (completed_results >= 6);
 		repeat (10) @(posedge clk_i);
+		
 
-		$display("\n[TB] Input matrix A row-major (from memory @ 0x%08x):", A_BASE);
+
+		$display("\n[TB] Sparse matrix A (from memory @ 0x%08x):", A_BASE);
 		for (r = 0; r < 4; r = r + 1) begin
 			logic [127:0] rowA;
 			rowA = mem_model[(A_BASE >> 4) + r];
@@ -302,7 +384,7 @@ module quadrilatero_xif_tb;
 			);
 		end
 
-		$display("\n[TB] Input matrix B col-major (from memory @ 0x%08x):", B_BASE);
+		$display("\n[TB] Dense matrix B (from memory @ 0x%08x):", B_BASE);
 		for (r = 0; r < 4; r = r + 1) begin
 			logic [127:0] rowB;
 			rowB = mem_model[(B_BASE >> 4) + r];
@@ -314,7 +396,7 @@ module quadrilatero_xif_tb;
 			);
 		end
 
-		$display("\n[TB] Result matrix C row-major (from memory @ 0x%08x):", C_BASE);
+		$display("\n[TB] Result matrix C (from memory @ 0x%08x):", C_BASE);
 		for (r = 0; r < 4; r = r + 1) begin
 			logic [127:0] rowC;
 			rowC = mem_model[(C_BASE >> 4) + r];
@@ -326,31 +408,8 @@ module quadrilatero_xif_tb;
 			);
 		end
 
-
-		issue_and_commit(enc_mzero(3'd2), 32'd0, 32'd0, 4'd6);
-
-		issue_and_commit(enc_mst_w(3'd2), C_BASE, ROW_STRIDE, 4'd7);
-
-		$display("");
-		wait (completed_results >= 6);
-		repeat (10) @(posedge clk_i);
-
-		$display("\n[TB] Result matrix C After Zeroing (from memory @ 0x%08x):", C_BASE);
-		for (r = 0; r < 4; r = r + 1) begin
-			logic [127:0] rowC;
-			rowC = mem_model[(C_BASE >> 4) + r];
-			$display("[TB] %0d %0d %0d %0d",
-				$signed(rowC[31:0]),
-				$signed(rowC[63:32]),
-				$signed(rowC[95:64]),
-				$signed(rowC[127:96])
-			);
-		end
-
-		
 		$finish;
 	end
-
 
 	initial begin
 		#50000ns;
