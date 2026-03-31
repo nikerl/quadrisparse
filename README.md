@@ -21,11 +21,20 @@ Then compile and run:
 make run
 ```
 
+## ISA Extention
+`QuadriSparse` is based on a RISC-V matrix extension available [here](https://github.com/esl-epfl/xheep_matrix_spec). Below are listed the instructions added by this project and their encodings.
+
+All instructions share `7'b0101011` (CUSTOM 1) as the major opcode, and func3 is `3'b000`.
+
+| mnemonic |31–27 |26–25 |24–18 |17–15 |14–12 |11–10 |9–7 |6–0 | 
+| ------- | ---- | ---- |----- | ---- | ---- | ---- | -- | -- |
+| spld.w | 00100	|00 | 0000000 | 000	|func3	|10	|md	|major opcode	|
+| dld.w | 00010	|00 | 0000000 | sp matrix reg |func3	|10	|md	|major opcode	|
+
 ## Directory Structure
 - `/rtl` contains the SystemVerilog files describing the co-processor
 - `/sw` contains example programs that can be used with the [x-heep](https://github.com/x-heep/x-heep) platform
 - `/tb` contains a standalone testbench which can be used to verify the functionality of the accelerator
-
 
 ## Licence
 Unless otherwise specified in their respective file headers all files in this repository are made available under Apache License v2.0 (`Apache-2.0`). Most RTL files are licenced under the Solderpad Hardware License v2.1 (`SHL-2.1`), see LICENCE.md.
