@@ -158,9 +158,7 @@ module quadrilatero_decoder
         datatype_o               = quadrilatero_pkg::SIZE_32;
         rf_writeback_o           = '1;
         is_sparse_o              = '1;
-
-        $display("DECODER DEBUG: instr_i=%0h, instr_valid_o=%b, is_sparse_o=%b", "n_matrix_operands_reads_o=%b",
-                      instr_i, instr_valid_o, is_sparse_o, n_matrix_operands_read_o);
+        
       end
       /*
          quadrilatero_instr_pkg::MMOV_MM    : begin

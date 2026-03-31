@@ -8,6 +8,8 @@ module quadrilatero_xif_tb;
 	localparam logic [31:0] A_BASE = 32'h0000_0000;
 	localparam logic [31:0] B_BASE = 32'h0000_0100;
 	localparam logic [31:0] C_BASE = 32'h0000_0200;
+	localparam logic [31:0] VAL_BASE = 32'h0000_0300;
+	localparam logic [31:0] COL_BASE = 32'h0000_0400;
 	localparam logic [31:0] ROW_STRIDE = 32'd16;
 
 	logic clk_i;
@@ -281,6 +283,10 @@ module quadrilatero_xif_tb;
 		mem_model[(B_BASE >> 4) + 2] = pack_row_lsb_first(32'd3, 32'd7, 32'd11, 32'd15);
 		mem_model[(B_BASE >> 4) + 3] = pack_row_lsb_first(32'd4, 32'd8, 32'd12, 32'd16);
 
+		// Sparse tile: 4 non-zero values and their column indices (one SPLD fetch each)
+		mem_model[(VAL_BASE >> 4)] = pack_row_lsb_first(32'd1, 32'd4, 32'd6, 32'd9);
+		mem_model[(COL_BASE >> 4)] = pack_row_lsb_first(32'd0, 32'd3, 32'd1, 32'd2);
+
 		repeat (6) @(posedge clk_i);
 		rst_ni = 1'b1;
 		repeat (4) @(posedge clk_i);
@@ -289,8 +295,10 @@ module quadrilatero_xif_tb;
 		// mld.w m0, [A_BASE], stride=16
 		//issue_and_commit(enc_mld_w(3'd0), A_BASE, ROW_STRIDE, 4'd1);
 
+		
 		// spld.w m0, [A_BASE], stride=16
-		issue_and_commit(enc_spld_w(3'd0), A_BASE, ROW_STRIDE, 4'd8);
+		
+		issue_and_commit(enc_spld_w(3'd0), VAL_BASE, COL_BASE, 4'd8);
 		wait (completed_results >= 1); // make sure SPLD is fully done
 		repeat (10) @(posedge clk_i);   // optional small delay for safety
 		
@@ -298,7 +306,7 @@ module quadrilatero_xif_tb;
 		issue_and_commit(enc_mld_w(3'd1), B_BASE, ROW_STRIDE, 4'd2);
 
 		// mzero m2
-		//issue_and_commit(enc_mzero(3'd2), 32'd0, 32'd0, 4'd3);
+		issue_and_commit(enc_mzero(3'd2), 32'd0, 32'd0, 4'd3);
 
 		// mmasa.w m2 += m0 * m1
 		//issue_and_commit(enc_mmasa_w(3'd0, 3'd1, 3'd2), 32'd0, 32'd0, 4'd4);
