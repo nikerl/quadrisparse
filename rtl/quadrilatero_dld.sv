@@ -102,6 +102,7 @@ module quadrilatero_dld #(
 	logic do_write;
 	logic last_row;
 
+	// Combinational logic for selecting the current row index and memory address based on the index row data
 	always_comb begin
 		selected_row_idx = idx_row_data_q[row_cnt_q*EL_WIDTH +: EL_WIDTH];
 		selected_mem_addr = base_addr_q + selected_row_idx * stride_q;
@@ -155,6 +156,7 @@ module quadrilatero_dld #(
 		rows_target_d  = rows_target_q;
 
 		case (state_q)
+			// Wait for start signal then latch configuration and start reading the index row
 			IDLE: begin
 			if (start_i) begin
 				stride_d       = stride_i;
@@ -174,11 +176,17 @@ module quadrilatero_dld #(
 			end
 			end
 
+			// Because of how the register file protocol is designed we need to read all the
+			// rows of the matrix register otherwise it will stall. 
+			// We only save the second row since that's the one containing the indices for the memory addresses we need to read.
 			READ_INDEX_ROW: begin
 			if (rdata_valid_i && rdata_ready_o) begin
+				// Latch the second row of the sparse matrix register
 				if (idx_row_cnt_q == $clog2(N_ROWS)'(1)) begin
 					idx_row_data_d = rdata_i;
 				end
+
+				// If we've read all rows of the index, move to the next state. Otherwise, read the next row.
 				if (idx_row_cnt_q == $clog2(N_ROWS)'(N_ROWS - 1)) begin
 					row_cnt_d = '0;
 					if (rows_target_q == 0) state_d = IDLE;
@@ -189,12 +197,14 @@ module quadrilatero_dld #(
 			end
 			end
 
+			// Wait for memory request to be granted
 			REQ_ROW: begin
 			if (data_req_o && data_gnt_i) begin
 				state_d = WAIT_ROW_DATA;
 			end
 			end
 
+			// Wait for the requested row data to be valid
 			WAIT_ROW_DATA: begin
 			if (data_rvalid_i) begin
 				row_data_d = data_rdata_i;
@@ -202,13 +212,15 @@ module quadrilatero_dld #(
 			end
 			end
 
+			// Write the row data to the register file
+			// then either go back to request the next row or finish if it was the last row
 			WRITE_ROW: begin
 			if (do_write && wready_i) begin
 				if (last_row) begin
-				state_d = IDLE;
+					state_d = IDLE;
 				end else begin
-				row_cnt_d = row_cnt_q + 1;
-				state_d = REQ_ROW;
+					row_cnt_d = row_cnt_q + 1;
+					state_d = REQ_ROW;
 				end
 			end
 			end
