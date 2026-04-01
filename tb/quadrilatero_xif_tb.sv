@@ -160,6 +160,25 @@ module quadrilatero_xif_tb;
 		end
 	endfunction
 
+	function automatic logic [31:0] enc_spmac_w(
+		input logic [2:0] a_reg,
+		input logic [2:0] b_reg,
+		input logic [2:0] acc_reg
+	);
+		logic [31:0] instr;
+		begin
+			instr         = '0;
+			instr[31:24]  = 8'b01000000;
+			instr[23:21]  = b_reg;
+			instr[20:18]  = a_reg;
+			instr[17:15]  = acc_reg;
+			instr[14:12]  = 3'b000;
+			instr[11:7]   = 5'b10000;
+			instr[6:0]    = 7'b0101011;
+			return instr;
+		end
+	endfunction
+
 	task automatic issue_and_commit(
 		input logic [31:0] instr,
 		input logic [31:0] rs0,
@@ -356,8 +375,8 @@ module quadrilatero_xif_tb;
 		// mzero m2
 		issue_and_commit(enc_mzero(3'd2), 32'd0, 32'd0, 4'd3);
 
-		// mmasa.w m2 += m0 * m1
-		issue_and_commit(enc_mmasa_w(3'd0, 3'd1, 3'd2), 32'd0, 32'd0, 4'd4);
+		// spmac.w m2 += m0 * m1
+		issue_and_commit(enc_spmac_w(3'd0, 3'd1, 3'd2), 32'd0, 32'd0, 4'd4);
 
 
 		// ########### STORE RESULTS ###########
@@ -367,7 +386,7 @@ module quadrilatero_xif_tb;
 		issue_and_commit(enc_mst_w(3'd2), C_BASE, ROW_STRIDE, 4'd7);
 
 		// IDs 3 and 4 are currently disabled (mzero/mmasa), so expect 4 completions.
-		wait (completed_results >= 6);
+		wait (completed_results >= 7);
 		repeat (10) @(posedge clk_i);
 		
 
