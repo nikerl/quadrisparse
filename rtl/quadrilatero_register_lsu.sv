@@ -137,17 +137,14 @@ module quadrilatero_register_lsu #(
   always_comb begin: write_to_RF
       // Default assignments
     data_mask  = '1 << (8 * n_bytes_cols_i);
-
-    // For sparse padding rows (2-3): force we_o even when FIFO is empty
+      // Default / force for sparse
     we_o       = (load_fifo_data_available | (is_sparse_i & counter_q[$clog2(N_ROWS)-1])) & ~mask_req;
     waddr_o    = waddr_q;
     wrowaddr_o = counter_q;
     wdata_o    = load_fifo_data & ~data_mask;
-    // For sparse: both real rows and padding rows use the same counter limit as dense
     wlast_o    = (counter_q == $clog2(N_ROWS)'(N_ROWS - 1)) && we_o && wready_i;
     if (is_sparse_i) begin
         wrowaddr_o = counter_q;
-        // rows 0-1: real FIFO data; rows 2-3: zero-pad to pop stale scoreboard entries
         wdata_o = load_fifo_data_available ? load_fifo_data : '0;
     end
   end
@@ -168,15 +165,12 @@ module quadrilatero_register_lsu #(
     lsu_ready = store_fifo_empty | (write_i &~ load_fifo_data_available &~ lsu_busy_q);
     start  = (start_i | start_q) & lsu_ready;
     busy_o = (write_i ? busy_d : busy | (load_fifo_data_available & counter_d == '0)) | start_q;
-
-    // For sparse: stride is (col_base - val_base) so the inner LSU naturally
-    // fetches val_base on row 0 and col_base on row 1.
     stride  = (start) ? (is_sparse_i ? (stride_i - address_i) : stride_i) : stride_q;
     src_ptr = (start) ? address_i : src_ptr_q;
   end
 
    always_comb begin: next_value
-    // - SPARSE CONTROL -
+    // SPARSE LOAD CONTROL
     if (is_sparse_i) begin
         if (we_o && wready_i) begin
             counter_d = wlast_o ? '0 : counter_q + 1;
@@ -184,7 +178,7 @@ module quadrilatero_register_lsu #(
             counter_d = counter_q;
         end
     end else begin
-    // - ORIGINAL CONTROL -
+    // ORIGINAL CONTROL
         if (rlast_o || wlast_o) begin
             counter_d = '0;
         end else if ((we_o && wready_i) || (rdata_valid_i && rdata_ready_o && !rlast_o)) begin
