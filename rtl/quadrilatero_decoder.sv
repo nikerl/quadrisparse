@@ -20,6 +20,7 @@ module quadrilatero_decoder
     output logic                                                                             is_dense_o              ,
     output logic                                                                             is_sparse_o             ,
     output logic                                                                             is_float_o              ,
+    output logic                                                                             is_spmac_o              ,
     output quadrilatero_pkg::execution_units_t                                                 exec_unit_o             ,
     output quadrilatero_pkg::datatype_t                                                        datatype_o
 );
@@ -36,6 +37,7 @@ module quadrilatero_decoder
     n_matrix_operands_read_o = '0;
     rf_writeback_o           = '0;
     is_float_o               = 1'b0;
+    is_spmac_o               = 1'b0;
 
     unique casez (instr_i)
       quadrilatero_instr_pkg::FMMACC_B: begin
@@ -117,6 +119,7 @@ module quadrilatero_decoder
         n_matrix_operands_read_o = 3;
         rf_writeback_o           = '1;
         datatype_o               = quadrilatero_pkg::SIZE_32;
+        is_spmac_o               = 1'b1;
       end
       /*
        quadrilatero_instr_pkg::MCFG       : begin

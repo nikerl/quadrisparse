@@ -128,6 +128,14 @@ module quadrilatero_systolic_array #(
   logic [xif_pkg::X_ID_WIDTH-1:0] finished_instr_id_q;
   logic                           mask_req           ;
 
+  logic [RLEN-1:0]                spmac_result_d     ;
+  logic [RLEN-1:0]                spmac_result_q     ;
+  logic [RLEN-1:0]                spmac_acc_d        ;
+  logic [RLEN-1:0]                spmac_acc_q        ;
+  logic [RLEN-1:0]                spmac_data_d       ;
+  logic [RLEN-1:0]                spmac_data_q       ;
+  logic [RLEN-1:0]                res_mesh_deskewed  ;
+
   quadrilatero_pkg::sa_ctrl_t [MESH_WIDTH-1:0]             sa_ctrl_mesh_skewed;
 
   logic                 [MESH_WIDTH-1:0][DATA_WIDTH-1:0] data_mesh_skewed   ;
@@ -157,10 +165,10 @@ module quadrilatero_systolic_array #(
     acc_rlast_o          = ff_counter_q==$clog2(MESH_WIDTH)'(MESH_WIDTH-1);
 
     // Accumulator Out Write Register Port
-    res_waddr_o         = dest_reg_q                ;
-    res_wrowaddr_o      = dr_counter_q              ;
-    res_we_o            = dr_active_q  &~ mask_req  ;
-    res_wlast_o         = dr_counter_q==$clog2(MESH_WIDTH)'(MESH_WIDTH-1);
+    res_waddr_o    = dest_reg_q;
+    res_wrowaddr_o = dr_counter_q;
+    res_we_o       = dr_active_q &~ mask_req;
+    res_wlast_o    = dr_counter_q==$clog2(MESH_WIDTH)'(MESH_WIDTH-1);
   end
 
   always_comb begin: next_value
@@ -209,6 +217,7 @@ module quadrilatero_systolic_array #(
   end
 
   always_comb begin: ctrl_block
+    // spmac: acc is only requested on ff_counter==0; subsequent cycles don't need it
     valid = weight_rdata_valid_i & data_rdata_valid_i & acc_rdata_valid_i;
     clear = ~ff_active_q & ~fs_active_q & ~dr_active_q;
 
@@ -228,6 +237,36 @@ module quadrilatero_systolic_array #(
 
     pump     = ff_enable | fs_enable | dr_enable                              ;
     mask_req = (dr_counter_q==$clog2(MESH_WIDTH)'(MESH_WIDTH-1)) & finished_q & ~finished_ack_i;
+  end
+
+  always_comb begin: spmac_block
+    spmac_acc_d    = spmac_acc_q;
+    spmac_result_d = spmac_result_q;
+    spmac_data_d   = spmac_data_q;
+
+    if (clear) begin
+      spmac_acc_d    = '0;
+      spmac_result_d = '0;
+      spmac_data_d   = '0;
+    end else if (sa_ctrl_q.is_spmac && ff_enable) begin
+      if (ff_counter_q == '0) begin
+        spmac_acc_d  = acc_rdata_i;
+        spmac_data_d = data_rdata_i;
+        for (int j = 0; j < MESH_WIDTH; j++) begin
+          spmac_result_d[j*DATA_WIDTH +: DATA_WIDTH] =
+            spmac_result_q[j*DATA_WIDTH +: DATA_WIDTH] +
+            data_rdata_i[DATA_WIDTH-1:0] *
+            weight_rdata_i[j*DATA_WIDTH +: DATA_WIDTH];
+        end
+      end else begin
+        for (int j = 0; j < MESH_WIDTH; j++) begin
+          spmac_result_d[j*DATA_WIDTH +: DATA_WIDTH] =
+            spmac_result_q[j*DATA_WIDTH +: DATA_WIDTH] +
+            spmac_data_q[ff_counter_q*DATA_WIDTH +: DATA_WIDTH] *
+            weight_rdata_i[j*DATA_WIDTH +: DATA_WIDTH];
+        end
+      end
+    end
   end
 
   quadrilatero_skewer #(
@@ -254,7 +293,7 @@ module quadrilatero_systolic_array #(
 
   quadrilatero_skewer #(
       .MESH_WIDTH(MESH_WIDTH),
-      .DATA_WIDTH(4)
+      .DATA_WIDTH($bits(quadrilatero_pkg::sa_ctrl_t))
   ) skewer_inst_ctrl (
       .clk_i                           ,
       .rst_ni                          ,
@@ -301,12 +340,16 @@ module quadrilatero_systolic_array #(
       .MESH_WIDTH(MESH_WIDTH),
       .DATA_WIDTH(DATA_WIDTH)
   ) deskewer_inst_acc (
-      .clk_i                   ,
-      .rst_ni                  ,
-      .pump_i (pump           ),
-      .data_i (res_mesh_skewed),
-      .data_o (res_wdata_o    )
+      .clk_i                        ,
+      .rst_ni                       ,
+      .pump_i (pump                ),
+      .data_i (res_mesh_skewed     ),
+      .data_o (res_mesh_deskewed   )
   );
+
+  assign res_wdata_o = sa_ctrl_q.is_spmac ?
+    (dr_counter_q == '0 ? spmac_result_q + spmac_acc_q : '0) :
+    res_mesh_deskewed;
 
   always_ff @(posedge clk_i or negedge rst_ni) begin: seq_block
     if (!rst_ni) begin
@@ -327,6 +370,9 @@ module quadrilatero_systolic_array #(
       id_dr_q             <= '0;
       finished_q          <= '0;
       finished_instr_id_q <= '0;
+      spmac_result_q      <= '0;
+      spmac_acc_q         <= '0;
+      spmac_data_q        <= '0;
     end else begin
       ff_counter_q        <= ff_counter_d        ;
       fs_counter_q        <= fs_counter_d        ;
@@ -345,6 +391,9 @@ module quadrilatero_systolic_array #(
       id_dr_q             <= id_dr_d             ;
       finished_q          <= finished_d          ;
       finished_instr_id_q <= finished_instr_id_d ;
+      spmac_result_q      <= spmac_result_d      ;
+      spmac_acc_q         <= spmac_acc_d         ;
+      spmac_data_q        <= spmac_data_d        ;
     end
   end
  

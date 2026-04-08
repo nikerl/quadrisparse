@@ -40,6 +40,7 @@ module quadrilatero_dispatcher #(
     input logic is_dense_i,  // dense-memory operation
     input logic is_float_i,  // float to arithmetic operation
     input logic is_sparse_i, // sparse tile load operation
+    input logic is_spmac_i,  // sparse mac operation
 
     input logic instr_valid_i,
     output logic [xif_pkg::X_ID_WIDTH-1:0] instr_id_o,  // id of the instruction out
@@ -50,7 +51,7 @@ module quadrilatero_dispatcher #(
     output logic is_dense_o,
     output logic is_sparse_o,
     output logic is_float_o,
-
+    output logic is_spmac_o,
 
     output logic [$clog2(N_REGS)-1:0] reg_ms1_o, 
     output logic [$clog2(N_REGS)-1:0] reg_ms2_o, 
@@ -89,6 +90,7 @@ module quadrilatero_dispatcher #(
   logic                                                     is_dense_d;
   logic                                                     is_sparse_d;
   logic                                                     is_float_d;
+  logic                                                     is_spmac_d;
   logic [xif_pkg::X_ID_WIDTH-1:0]                           instr_id_q;  // id of the instruction out
   logic [xif_pkg::X_NUM_RS  -1:0][xif_pkg::X_RFR_WIDTH-1:0] rs_q      ;  // Register file source operands for the offloaded instruction
   logic [xif_pkg::X_NUM_RS  -1:0]                           rs_valid_q;  // Validity of the register file source operand(s)
@@ -97,7 +99,8 @@ module quadrilatero_dispatcher #(
   logic                                                     is_dense_q;
   logic                                                     is_sparse_q;
   logic                                                     is_float_q;
-  
+  logic                                                     is_spmac_q;
+
   logic [2:0][$clog2(N_REGS)-1:0] rreg_d    ;
   logic      [$clog2(N_REGS)-1:0] wreg_d    ;
   logic [2:0][$clog2(N_REGS)-1:0] rreg_q    ;
@@ -195,6 +198,7 @@ module quadrilatero_dispatcher #(
     is_dense_d = (instr_ready || state_q==IDLE) ? is_dense_i : is_dense_q;
     is_sparse_d = (instr_ready || state_q==IDLE) ? is_sparse_i : is_sparse_q;
     is_float_d = (instr_ready || state_q==IDLE) ? is_float_i : is_float_q;
+    is_spmac_d = (instr_ready || state_q==IDLE) ? is_spmac_i : is_spmac_q;
 
     dispatch_d              = '0         ;
     dispatch_d[exec_unit_i] = instr_ready;
@@ -278,6 +282,7 @@ module quadrilatero_dispatcher #(
       is_dense_q      <= '0;
       is_sparse_q     <= '0;
       is_float_q      <= '0;
+      is_spmac_q      <= '0;
 
       back_push_op1_q <= 1'b0;
       back_push_op2_q <= 1'b0;
@@ -300,6 +305,7 @@ module quadrilatero_dispatcher #(
       is_dense_q      <= is_dense_d;
       is_sparse_q     <= is_sparse_d;
       is_float_q      <= is_float_d;
+      is_spmac_q      <= is_spmac_d;
 
       back_push_op1_q <= back_push_op1_d;
       back_push_op2_q <= back_push_op2_d;
@@ -324,6 +330,7 @@ module quadrilatero_dispatcher #(
   assign is_dense_o    = is_dense_q ;
   assign is_sparse_o   = is_sparse_q ;
   assign is_float_o    = is_float_q ;
+  assign is_spmac_o    = is_spmac_q ;
 
   assign reg_ms1_o     = rreg_q[0]  ; 
   assign reg_ms2_o     = rreg_q[1]  ; 

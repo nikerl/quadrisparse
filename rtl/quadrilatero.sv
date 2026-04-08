@@ -94,6 +94,7 @@ module quadrilatero
   logic                                                                                decoder_is_dense_out          ;
   logic                                                                                decoder_is_sparse_out         ;
   logic                                                                                decoder_is_float_out          ;
+  logic                                                                                decoder_is_spmac_out          ;
   quadrilatero_pkg::execution_units_t                                                    decoder_exec_unit             ;
   quadrilatero_pkg::datatype_t                                                           decoder_datatype_out          ;
   logic[quadrilatero_pkg::MAX_NUM_READ_OPERANDS-1:0][$clog2(quadrilatero_pkg::N_REGS)-1:0] decoder_rf_read_regs          ;
@@ -105,6 +106,7 @@ module quadrilatero
   logic                                                                                         dispatcher_is_dense_out          ;
   logic                                                                                         dispatcher_is_sparse_out         ;
   logic                                                                                         dispatcher_is_float_out          ;
+  logic                                                                                         dispatcher_is_spmac_out          ;
   logic                                                                                         dispatcher_instr_valid           ;
   logic                                                                                         dispatcher_instr_ready           ;
   quadrilatero_pkg::rw_queue_t                               [quadrilatero_pkg::N_REGS-1        :0] dispatcher_rw_queue_entry        ;
@@ -487,7 +489,8 @@ module quadrilatero
       .is_store_o                (decoder_is_store_out          ),
       .is_dense_o                (decoder_is_dense_out          ),
       .is_sparse_o               (decoder_is_sparse_out         ),    
-      .is_float_o                (decoder_is_float_out          )
+      .is_float_o                (decoder_is_float_out          ),
+      .is_spmac_o                (decoder_is_spmac_out          )
   );
 
 
@@ -543,6 +546,7 @@ module quadrilatero
       .is_dense_i                 (decoder_is_dense_out             ),
       .is_sparse_i                (decoder_is_sparse_out            ),       
       .is_float_i                 (decoder_is_float_out             ),
+      .is_spmac_i                 (decoder_is_spmac_out             ),
       .rf_read_regs_i             (dispatcher_rf_read_regs          ),  // which registers to read from 
       .rf_writeback_i             (dispatcher_rf_writeback          ),  // whether we need to write to the register file
       .rf_writeback_reg_i         (dispatcher_rf_writeback_reg      ),  // which register to writeback to 
@@ -556,6 +560,7 @@ module quadrilatero
       .is_dense_o                 (dispatcher_is_dense_out          ),
       .is_sparse_o                (dispatcher_is_sparse_out         ), 
       .is_float_o                 (dispatcher_is_float_out          ),
+      .is_spmac_o                 (dispatcher_is_spmac_out          ),
       .reg_ms1_o                  (dispatcher_reg_ms1               ),
       .reg_ms2_o                  (dispatcher_reg_ms2               ),
       .reg_ms3_o                  (dispatcher_reg_ms3               ),
@@ -715,6 +720,7 @@ module quadrilatero
     sa_ctrl_dispatched_instr.id               = dispatcher_instr_id_out                               ;
     sa_ctrl_dispatched_instr.sa_ctrl.datatype = dispatcher_instr_datatype_out                         ;
     sa_ctrl_dispatched_instr.sa_ctrl.is_float = dispatcher_is_float_out                               ;
+    sa_ctrl_dispatched_instr.sa_ctrl.is_spmac = dispatcher_is_spmac_out                               ;
 
     // From Register File 
     sa_data_rdata_valid   = rf_seq_rvalid_from_fu[quadrilatero_pkg::SYSTOLIC_ARRAY_D];
