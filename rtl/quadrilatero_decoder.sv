@@ -118,6 +118,7 @@ module quadrilatero_decoder
         n_matrix_operands_read_o = 3;
         rf_writeback_o           = '1;
         datatype_o               = quadrilatero_pkg::SIZE_32;
+        is_sparse_o              = '1;
       end
       /*
        quadrilatero_instr_pkg::MCFG       : begin

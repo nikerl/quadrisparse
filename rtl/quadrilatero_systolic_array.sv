@@ -70,270 +70,296 @@ module quadrilatero_systolic_array #(
     output logic [xif_pkg::X_ID_WIDTH-1:0] sa_input_id_o       ,
     output logic [xif_pkg::X_ID_WIDTH-1:0] sa_output_id_o      ,
 
-    // Finish
+    // Finish 
     output logic                           finished_o          ,
     input  logic                           finished_ack_i      ,
     output logic [xif_pkg::X_ID_WIDTH-1:0] finished_instr_id_o
 );
 
-  localparam int CNT_W = (MESH_WIDTH > 1) ? $clog2(MESH_WIDTH + 1) : 1;
-  typedef enum logic [1:0] {
-    ST_IDLE,
-    ST_LOAD,
-    ST_WRITE
-  } sa_state_t;
+  logic                           ff_active_d        ;
+  logic                           ff_active_q        ;
+  logic                           fs_active_d        ;
+  logic                           fs_active_q        ;
+  logic                           dr_active_d        ;
+  logic                           dr_active_q        ;
+  logic                           set_ff_active      ;
+  logic                           rst_ff_active      ;
+  logic                           set_fs_active      ;
+  logic                           rst_fs_active      ;
+  logic                           set_dr_active      ;
+  logic                           rst_dr_active      ;
+  logic                           valid              ;
+  logic                           clear              ;
+  logic                           ff_enable          ;
+  logic                           fs_enable          ;
+  logic                           dr_enable          ;
+  logic                           pump               ;
+  logic [$clog2(MESH_WIDTH)-1 :0] ff_counter_d       ;
+  logic [$clog2(MESH_WIDTH)-1 :0] ff_counter_q       ;
+  logic [$clog2(MESH_WIDTH)-1 :0] fs_counter_d       ;
+  logic [$clog2(MESH_WIDTH)-1 :0] fs_counter_q       ;
+  logic [$clog2(MESH_WIDTH)-1 :0] dr_counter_d       ;
+  logic [$clog2(MESH_WIDTH)-1 :0] dr_counter_q       ;
 
-  sa_state_t state_d;
-  sa_state_t state_q;
+  logic [     $clog2(N_REGS)-1:0] data_reg_d         ;  // Data register
+  logic [     $clog2(N_REGS)-1:0] data_reg_q         ;  // Data register
+  logic [     $clog2(N_REGS)-1:0] acc_reg_d          ;  // Accumulator register -- FF Stage
+  logic [     $clog2(N_REGS)-1:0] acc_reg_q          ;  // Accumulator register -- FF Stage
+  logic [     $clog2(N_REGS)-1:0] weight_reg_q       ;  // Weight register
+  logic [     $clog2(N_REGS)-1:0] weight_reg_d       ;  // Weight register
+  quadrilatero_pkg::sa_ctrl_t       sa_ctrl_d          ;
+  quadrilatero_pkg::sa_ctrl_t       sa_ctrl_q          ;
 
-  logic [CNT_W-1:0] load_cnt_d;
-  logic [CNT_W-1:0] load_cnt_q;
-  logic [CNT_W-1:0] write_cnt_d;
-  logic [CNT_W-1:0] write_cnt_q;
+  logic [     $clog2(N_REGS)-1:0] acc_fs_q           ;  // Accumulator register -- FS Stage
+  logic [     $clog2(N_REGS)-1:0] acc_fs_d           ;  // Accumulator register -- FS Stage
+  logic [     $clog2(N_REGS)-1:0] dest_reg_q         ;  // Accumulator register -- DR Stage
+  logic [     $clog2(N_REGS)-1:0] dest_reg_d         ;  // Accumulator register -- DR Stage
 
-  logic [$clog2(N_REGS)-1:0] data_reg_d;
-  logic [$clog2(N_REGS)-1:0] data_reg_q;
-  logic [$clog2(N_REGS)-1:0] acc_reg_d;
-  logic [$clog2(N_REGS)-1:0] acc_reg_q;
-  logic [$clog2(N_REGS)-1:0] weight_reg_d;
-  logic [$clog2(N_REGS)-1:0] weight_reg_q;
-  logic [$clog2(N_REGS)-1:0] dest_reg_d;
-  logic [$clog2(N_REGS)-1:0] dest_reg_q;
+  logic [xif_pkg::X_ID_WIDTH-1:0] id_ff_d            ;
+  logic [xif_pkg::X_ID_WIDTH-1:0] id_ff_q            ;
+  logic [xif_pkg::X_ID_WIDTH-1:0] id_fs_d            ;
+  logic [xif_pkg::X_ID_WIDTH-1:0] id_fs_q            ;
+  logic [xif_pkg::X_ID_WIDTH-1:0] id_dr_d            ;
+  logic [xif_pkg::X_ID_WIDTH-1:0] id_dr_q            ;
 
-  logic [xif_pkg::X_ID_WIDTH-1:0] id_d;
-  logic [xif_pkg::X_ID_WIDTH-1:0] id_q;
-  quadrilatero_pkg::sa_ctrl_t       sa_ctrl_d;
-  quadrilatero_pkg::sa_ctrl_t       sa_ctrl_q;
-
-  logic                           finished_d;
-  logic                           finished_q;
+  logic                           finished_d         ;
+  logic                           finished_q         ;
   logic [xif_pkg::X_ID_WIDTH-1:0] finished_instr_id_d;
   logic [xif_pkg::X_ID_WIDTH-1:0] finished_instr_id_q;
+  logic                           mask_req           ;
 
-  logic [MESH_WIDTH-1:0][MESH_WIDTH-1:0][DATA_WIDTH-1:0] weight_matrix_d;
-  logic [MESH_WIDTH-1:0][MESH_WIDTH-1:0][DATA_WIDTH-1:0] weight_matrix_q;
-  logic [MESH_WIDTH-1:0][MESH_WIDTH-1:0][DATA_WIDTH-1:0] acc_matrix_d;
-  logic [MESH_WIDTH-1:0][MESH_WIDTH-1:0][DATA_WIDTH-1:0] acc_matrix_q;
-  logic [MESH_WIDTH-1:0][DATA_WIDTH-1:0]                 a_row_d;
-  logic [MESH_WIDTH-1:0][DATA_WIDTH-1:0]                 a_row_q;
+  quadrilatero_pkg::sa_ctrl_t [MESH_WIDTH-1:0]             sa_ctrl_mesh_skewed;
 
-  logic [MESH_WIDTH-1:0][MESH_WIDTH-1:0][DATA_WIDTH-1:0] reduce_partial;
-  logic [MESH_WIDTH-1:0][DATA_WIDTH-1:0]                 reduced_bottom;
+  logic                 [MESH_WIDTH-1:0][DATA_WIDTH-1:0] data_mesh_skewed   ;
+  logic                 [MESH_WIDTH-1:0][DATA_WIDTH-1:0] acc_mesh_skewed    ;
+  logic [MESH_WIDTH-1:0][MESH_WIDTH-1:0][DATA_WIDTH-1:0] weight_mesh_skewed ;
+  logic                 [MESH_WIDTH-1:0][DATA_WIDTH-1:0] res_mesh_skewed    ;
 
-  logic [DATA_WIDTH-1:0] row_write_data [MESH_WIDTH-1:0];
-
-  logic load_handshake;
-  logic write_handshake;
-
-  assign load_handshake   = (state_q == ST_LOAD) && weight_rdata_ready_o &&
-                            weight_rdata_valid_i && data_rdata_valid_i && acc_rdata_valid_i;
-  assign write_handshake  = (state_q == ST_WRITE) && res_we_o             && res_wready_i;
-
-  // Integer downward reduction network:
-  // A[row] is broadcast on each row and multiplied by statically mapped B[row][col].
-  genvar i, j;
-  generate
-    for (i = 0; i < MESH_WIDTH; i++) begin : gen_reduce_rows
-      for (j = 0; j < MESH_WIDTH; j++) begin : gen_reduce_cols
-        quadrilatero_mac_int #(
-            .ENABLE_SIMD(ENABLE_SIMD)
-        ) reduce_mac_i (
-            .weight_i      (weight_matrix_q[i][j]),
-            .data_i        (a_row_q[i]),
-            .acc_i         ((i == 0) ? '0 : reduce_partial[i-1][j]),
-            .op_datatype_i (sa_ctrl_q.datatype),
-            .acc_o         (reduce_partial[i][j]),
-            .mac_finished_o()
-        );
-      end
-    end
-  endgenerate
-
-  always_comb begin: reduction_block
-    for (int col = 0; col < MESH_WIDTH; col++) begin
-      if (sa_ctrl_q.is_float) begin
-        reduced_bottom[col] = acc_matrix_q[MESH_WIDTH-1][col];
-      end else begin
-        reduced_bottom[col] = reduce_partial[MESH_WIDTH-1][col] + acc_matrix_q[MESH_WIDTH-1][col];
-      end
-    end
-  end
+  //---------------------------------------------------------------------
 
   always_comb begin: rf_block
-    logic [$clog2(N_ROWS)-1:0] weight_row;
-    logic [$clog2(N_ROWS)-1:0] data_row;
-    logic [$clog2(N_ROWS)-1:0] acc_row;
-    logic [$clog2(N_ROWS)-1:0] write_row;
+    // Weight Read Register Port
+    weight_raddr_o       = weight_reg_q              ;
+    weight_rrowaddr_o    = ff_counter_q              ;
+    weight_rdata_ready_o = ff_active_q &~ mask_req   ;
+    weight_rlast_o       = ff_counter_q==$clog2(MESH_WIDTH)'(MESH_WIDTH-1);
 
-    weight_row = (load_cnt_q >= CNT_W'(MESH_WIDTH)) ? $clog2(N_ROWS)'(MESH_WIDTH-1)
-                             : load_cnt_q[$clog2(N_ROWS)-1:0];
-    data_row   = weight_row;
-    acc_row    = weight_row;
-    write_row  = (write_cnt_q  >= CNT_W'(MESH_WIDTH)) ? $clog2(N_ROWS)'(MESH_WIDTH-1)
-                                                       : write_cnt_q[$clog2(N_ROWS)-1:0];
+    // Data Read Register Port
+    data_raddr_o         = data_reg_q                ;
+    data_rrowaddr_o      = ff_counter_q              ;
+    data_rdata_ready_o   = ff_active_q  &~ mask_req  ;
+    data_rlast_o         = ff_counter_q==$clog2(MESH_WIDTH)'(MESH_WIDTH-1);
 
-    weight_raddr_o       = weight_reg_q;
-    weight_rrowaddr_o    = weight_row;
-    weight_rdata_ready_o = (state_q == ST_LOAD) && (load_cnt_q < CNT_W'(MESH_WIDTH));
-    weight_rlast_o       = (load_cnt_q == CNT_W'(MESH_WIDTH-1));
+    // Accumulator Read Register Port
+    acc_raddr_o          = acc_reg_q                 ;
+    acc_rrowaddr_o       = ff_counter_q              ;
+    acc_rdata_ready_o    = ff_active_q &~ mask_req   ;
+    acc_rlast_o          = ff_counter_q==$clog2(MESH_WIDTH)'(MESH_WIDTH-1);
 
-    data_raddr_o         = data_reg_q;
-    data_rrowaddr_o      = data_row;
-    data_rdata_ready_o   = (state_q == ST_LOAD) && (load_cnt_q < CNT_W'(MESH_WIDTH));
-    data_rlast_o         = (load_cnt_q == CNT_W'(MESH_WIDTH-1));
-
-    acc_raddr_o          = acc_reg_q;
-    acc_rrowaddr_o       = acc_row;
-    acc_rdata_ready_o    = (state_q == ST_LOAD) && (load_cnt_q < CNT_W'(MESH_WIDTH));
-    acc_rlast_o          = (load_cnt_q == CNT_W'(MESH_WIDTH-1));
-
-    res_waddr_o          = dest_reg_q;
-    res_wrowaddr_o       = write_row;
-    res_we_o             = (state_q == ST_WRITE) && (write_cnt_q < CNT_W'(MESH_WIDTH));
-    res_wlast_o          = (write_cnt_q == CNT_W'(MESH_WIDTH-1));
-
-    for (int col = 0; col < MESH_WIDTH; col++) begin
-      row_write_data[col] = (write_row == $clog2(N_ROWS)'(MESH_WIDTH-1))
-          ? reduced_bottom[col]
-          : acc_matrix_q[write_row][col];
-      res_wdata_o[DATA_WIDTH*col +: DATA_WIDTH] = row_write_data[col];
-    end
+    // Accumulator Out Write Register Port
+    res_waddr_o         = dest_reg_q                ;
+    res_wrowaddr_o      = dr_counter_q              ;
+    res_we_o            = dr_active_q  &~ mask_req  ;
+    res_wlast_o         = dr_counter_q==$clog2(MESH_WIDTH)'(MESH_WIDTH-1);
   end
 
   always_comb begin: next_value
-    state_d             = state_q;
 
-    load_cnt_d          = load_cnt_q;
-    write_cnt_d         = write_cnt_q;
+    // Configuration
+    data_reg_d    = (set_ff_active) ? data_reg_i    : data_reg_q   ;
+    acc_reg_d     = (set_ff_active) ? acc_reg_i     : acc_reg_q    ;
+    weight_reg_d  = (set_ff_active) ? weight_reg_i  : weight_reg_q ;
+    sa_ctrl_d     = (set_ff_active) ? sa_ctrl_i     : sa_ctrl_q    ;
 
-    data_reg_d          = data_reg_q;
-    acc_reg_d           = acc_reg_q;
-    weight_reg_d        = weight_reg_q;
-    dest_reg_d          = dest_reg_q;
-    id_d                = id_q;
-    sa_ctrl_d           = sa_ctrl_q;
+    acc_fs_d      = (set_fs_active) ? acc_reg_q     : acc_fs_q     ;
+    dest_reg_d    = (set_dr_active) ? acc_fs_q      : dest_reg_q   ;
 
-    weight_matrix_d     = weight_matrix_q;
-    acc_matrix_d        = acc_matrix_q;
-    a_row_d             = a_row_q;
+    id_ff_d       = (set_ff_active) ? id_i          : id_ff_q      ;
+    id_fs_d       = (set_fs_active) ? id_ff_q       : id_fs_q      ;
+    id_dr_d       = (set_dr_active) ? id_fs_q       : id_dr_q      ;
 
-    finished_d          = finished_q;
-    finished_instr_id_d = finished_instr_id_q;
+    // Finished
+    finished_d          = (res_wready_i && res_wlast_o) ? 1'b1 :
+                          (finished_ack_i             ) ? 1'b0 : finished_q;
 
-    if (finished_ack_i) begin
-      finished_d          = 1'b0;
-      finished_instr_id_d = '0;
-    end
+    finished_instr_id_d = (res_wready_i && res_wlast_o) ? id_dr_q :
+                          (finished_ack_i             ) ? '0      : finished_instr_id_q; 
 
-    case (state_q)
-      ST_IDLE: begin
-        load_cnt_d   = '0;
-        write_cnt_d  = '0;
+    // Counters
+    ff_counter_d = (ff_enable && ff_counter_q==$clog2(MESH_WIDTH)'(MESH_WIDTH-1)) ? '0               :
+                   (ff_enable                              ) ? ff_counter_q + 1 : ff_counter_q;
+                   
+    fs_counter_d = (clear                                  ) ||
+                   (fs_enable && fs_counter_q==$clog2(MESH_WIDTH)'(MESH_WIDTH-1))    ? '0               :
+                   (fs_enable                              )    ? fs_counter_q + 1 : fs_counter_q;
 
-        if (start_i && !finished_q) begin
-          state_d      = ST_LOAD;
-          data_reg_d   = data_reg_i;
-          acc_reg_d    = acc_reg_i;
-          weight_reg_d = weight_reg_i;
-          dest_reg_d   = acc_reg_i;
-          id_d         = id_i;
-          sa_ctrl_d    = sa_ctrl_i;
-          a_row_d      = '0;
-        end
-      end
+    dr_counter_d = (clear                                  ) ||
+                   (dr_enable && dr_counter_q==$clog2(MESH_WIDTH)'(MESH_WIDTH-1))    ? '0               :
+                   (dr_enable                              )    ? dr_counter_q + 1 : dr_counter_q;
 
-      ST_LOAD: begin
-        if (load_handshake) begin
-          for (int col = 0; col < MESH_WIDTH; col++) begin
-            weight_matrix_d[load_cnt_q][col] = weight_rdata_i[DATA_WIDTH*col +: DATA_WIDTH];
-          end
-          if (load_cnt_q == '0) begin
-            for (int col = 0; col < MESH_WIDTH; col++) begin
-              a_row_d[col] = data_rdata_i[DATA_WIDTH*col +: DATA_WIDTH];
-            end
-          end
-          for (int col = 0; col < MESH_WIDTH; col++) begin
-            acc_matrix_d[load_cnt_q][col] = acc_rdata_i[DATA_WIDTH*col +: DATA_WIDTH];
-          end
-          load_cnt_d = load_cnt_q + CNT_W'(1);
-        end
+    // Active signals
+    ff_active_d = set_ff_active ? 1'b1 :
+                  rst_ff_active ? 1'b0 : ff_active_q;
 
-        if (load_cnt_q == CNT_W'(MESH_WIDTH)) begin
-          state_d    = ST_WRITE;
-          write_cnt_d = '0;
-        end
-      end
+    fs_active_d = set_fs_active ? 1'b1 :
+                  rst_fs_active ? 1'b0 : fs_active_q;
 
-      ST_WRITE: begin
-        if (write_handshake) begin
-          if (write_cnt_q == CNT_W'(MESH_WIDTH-1)) begin
-            state_d             = ST_IDLE;
-            write_cnt_d         = '0;
-            finished_d          = 1'b1;
-            finished_instr_id_d = id_q;
-          end else begin
-            write_cnt_d = write_cnt_q + CNT_W'(1);
-          end
-        end
-      end
-
-      default: state_d = ST_IDLE;
-    endcase
+    dr_active_d = set_dr_active ? 1'b1 :
+                  rst_dr_active ? 1'b0 : dr_active_q;
   end
+
+  always_comb begin: ctrl_block
+    valid = weight_rdata_valid_i & data_rdata_valid_i & acc_rdata_valid_i;
+    clear = ~ff_active_q & ~fs_active_q & ~dr_active_q;
+
+    ff_enable = ff_active_q &  valid                ;
+    // fs_enable = fs_active_q & (valid | ~ff_active_q);
+    // dr_enable = dr_active_q & (valid | ~ff_active_q);
+    fs_enable = fs_active_q;
+    dr_enable = dr_active_q;
+
+    set_ff_active = ff_counter_d=='0 & start_i                                                                                          ;
+    set_fs_active = fs_counter_d=='0 & ff_counter_d=='0                                & ff_counter_q==$clog2(MESH_WIDTH)'(MESH_WIDTH-1);
+    set_dr_active = dr_counter_d=='0 & fs_counter_d==$clog2(MESH_WIDTH)'(MESH_WIDTH-1) & fs_counter_q==$clog2(MESH_WIDTH)'(MESH_WIDTH-2);
+
+    rst_ff_active = ff_counter_q==$clog2(MESH_WIDTH)'(MESH_WIDTH-1) & ff_counter_d=='0                                      ;
+    rst_fs_active = fs_counter_q==$clog2(MESH_WIDTH)'(MESH_WIDTH-1) & fs_counter_d=='0 & ff_counter_d=='0 & ff_counter_q=='0;
+    rst_dr_active = dr_counter_q==$clog2(MESH_WIDTH)'(MESH_WIDTH-1) & dr_counter_d=='0 & fs_counter_d=='0 & fs_counter_q=='0;
+
+    pump     = ff_enable | fs_enable | dr_enable                              ;
+    mask_req = (dr_counter_q==$clog2(MESH_WIDTH)'(MESH_WIDTH-1)) & finished_q & ~finished_ack_i;
+  end
+
+  quadrilatero_skewer #(
+      .MESH_WIDTH(MESH_WIDTH),
+      .DATA_WIDTH(DATA_WIDTH)
+  ) skewer_inst_data (
+      .clk_i                    ,
+      .rst_ni                   ,
+      .pump_i (pump            ),
+      .data_i (data_rdata_i    ),
+      .data_o (data_mesh_skewed)
+  );
+
+  quadrilatero_skewer #(
+      .MESH_WIDTH(MESH_WIDTH),
+      .DATA_WIDTH(DATA_WIDTH)
+  ) skewer_inst_acc (
+      .clk_i                   ,
+      .rst_ni                  ,
+      .pump_i (pump           ),
+      .data_i (acc_rdata_i    ),
+      .data_o (acc_mesh_skewed)
+  );
+
+  quadrilatero_skewer #(
+      .MESH_WIDTH(MESH_WIDTH),
+      .DATA_WIDTH($bits(quadrilatero_pkg::sa_ctrl_t))
+  ) skewer_inst_ctrl (
+      .clk_i                           ,
+      .rst_ni                          ,
+      .pump_i (pump                   ),
+      .data_i ({MESH_WIDTH{sa_ctrl_q}}),
+      .data_o (sa_ctrl_mesh_skewed    )
+  );
+
+  quadrilatero_wl_stage #(
+      .MESH_WIDTH(MESH_WIDTH),
+      .DATA_WIDTH(DATA_WIDTH)
+  ) weight_inst (
+    .clk_i                                           ,
+    .rst_ni                                          ,
+
+    .ff_counter             (ff_counter_q           ),
+    .clear_i                (clear                  ),
+    .pump_i                 (pump                   ),
+    .weight_rdata_valid_i                            ,
+    
+    // Weight Data 
+    .weight_rdata_i                                  ,
+    .weight_rdata_o         (weight_mesh_skewed     ) 
+  );
+
+  quadrilatero_mesh #(
+      .MESH_WIDTH (MESH_WIDTH ),
+      .ENABLE_SIMD(ENABLE_SIMD),
+      .FPU        (FPU        )
+  ) mesh_inst (
+      .clk_i,
+      .rst_ni,
+
+      .pump_i         (pump                   ),
+      .sa_ctrl_i      (sa_ctrl_mesh_skewed    ),
+
+      .data_i         (data_mesh_skewed       ),
+      .acc_i          (acc_mesh_skewed        ),
+      .weight_i       (weight_mesh_skewed     ),
+      .acc_o          (res_mesh_skewed        )
+  );
+
+  quadrilatero_deskewer #(
+      .MESH_WIDTH(MESH_WIDTH),
+      .DATA_WIDTH(DATA_WIDTH)
+  ) deskewer_inst_acc (
+      .clk_i                   ,
+      .rst_ni                  ,
+      .pump_i (pump           ),
+      .data_i (res_mesh_skewed),
+      .data_o (res_wdata_o    )
+  );
 
   always_ff @(posedge clk_i or negedge rst_ni) begin: seq_block
     if (!rst_ni) begin
-      state_q             <= ST_IDLE;
-      load_cnt_q          <= '0;
-      write_cnt_q         <= '0;
+      ff_counter_q        <= '0;
+      fs_counter_q        <= '0;
+      dr_counter_q        <= '0;
+      ff_active_q         <= '0;
+      fs_active_q         <= '0;
+      dr_active_q         <= '0;
       data_reg_q          <= '0;
       acc_reg_q           <= '0;
       weight_reg_q        <= '0;
-      dest_reg_q          <= '0;
-      id_q                <= '0;
       sa_ctrl_q           <= '0;
-      weight_matrix_q     <= '0;
-      acc_matrix_q        <= '0;
-      a_row_q             <= '0;
+      acc_fs_q            <= '0;
+      dest_reg_q          <= '0;
+      id_ff_q             <= '0;
+      id_fs_q             <= '0;
+      id_dr_q             <= '0;
       finished_q          <= '0;
       finished_instr_id_q <= '0;
     end else begin
-      state_q             <= state_d;
-      load_cnt_q          <= load_cnt_d;
-      write_cnt_q         <= write_cnt_d;
-      data_reg_q          <= data_reg_d;
-      acc_reg_q           <= acc_reg_d;
-      weight_reg_q        <= weight_reg_d;
-      dest_reg_q          <= dest_reg_d;
-      id_q                <= id_d;
-      sa_ctrl_q           <= sa_ctrl_d;
-      weight_matrix_q     <= weight_matrix_d;
-      acc_matrix_q        <= acc_matrix_d;
-      a_row_q             <= a_row_d;
-      finished_q          <= finished_d;
-      finished_instr_id_q <= finished_instr_id_d;
+      ff_counter_q        <= ff_counter_d        ;
+      fs_counter_q        <= fs_counter_d        ;
+      dr_counter_q        <= dr_counter_d        ;
+      ff_active_q         <= ff_active_d         ;
+      fs_active_q         <= fs_active_d         ;
+      dr_active_q         <= dr_active_d         ;
+      data_reg_q          <= data_reg_d          ;
+      acc_reg_q           <= acc_reg_d           ;
+      weight_reg_q        <= weight_reg_d        ;
+      sa_ctrl_q           <= sa_ctrl_d           ;
+      acc_fs_q            <= acc_fs_d            ;
+      dest_reg_q          <= dest_reg_d          ;
+      id_ff_q             <= id_ff_d             ;
+      id_fs_q             <= id_fs_d             ;
+      id_dr_q             <= id_dr_d             ;
+      finished_q          <= finished_d          ;
+      finished_instr_id_q <= finished_instr_id_d ;
     end
   end
-
-  assign sa_ready_o          = (state_q == ST_IDLE) & ~finished_q;
-  assign sa_input_id_o       = id_q;
-  assign sa_output_id_o      = id_q;
-  assign finished_o          = finished_q;
+ 
+  assign sa_ready_o          = (ff_counter_d=='0) & ((ff_active_q &~ ff_counter_q=='0) | (~ff_active_q & ~fs_active_q & ~dr_active_q));
+  assign sa_input_id_o       = id_ff_q            ;
+  assign sa_output_id_o      = id_dr_q            ;
+  assign finished_o          = finished_q         ;
   assign finished_instr_id_o = finished_instr_id_q;
 
   // --------------------------------------------------------------------
-
+  
   // Assertions
   if (MESH_WIDTH < 2) begin
     $error(
         "[systolic_array] MESH_WIDTH must be at least 2.\n"
     );
   end
-
-  if (DATA_WIDTH != 32) begin
-    $error(
-        "[systolic_array] This implementation currently supports DATA_WIDTH == 32.\n"
-    );
-  end
-
 endmodule

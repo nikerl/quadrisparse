@@ -15,8 +15,9 @@ module quadrilatero_xif_tb;
 	localparam logic [31:0] A_BASE = 32'h0000_0000;
 	localparam logic [31:0] B_BASE = 32'h0000_0100;
 	localparam logic [31:0] C_BASE = 32'h0000_0200;
-	localparam logic [31:0] VAL_BASE = 32'h0000_0300;
-	localparam logic [31:0] COL_BASE = 32'h0000_0400;
+	localparam logic [31:0] D_BASE = 32'h0000_0300;
+	localparam logic [31:0] VAL_BASE = 32'h0000_0400;
+	localparam logic [31:0] COL_BASE = 32'h0000_0500;
 	localparam logic [31:0] ROW_STRIDE = 32'd16;
 
 	logic clk_i;
@@ -374,19 +375,26 @@ module quadrilatero_xif_tb;
 		// ########### PERFORM MATMUL ###########
 		// mzero m2
 		issue_and_commit(enc_mzero(3'd2), 32'd0, 32'd0, 4'd3);
+		// mzero m3
+		issue_and_commit(enc_mzero(3'd3), 32'd0, 32'd0, 4'd4);
 
 		// spmac.w m2 += m0 * m1
-		issue_and_commit(enc_spmac_w(3'd0, 3'd1, 3'd2), 32'd0, 32'd0, 4'd4);
+		issue_and_commit(enc_spmac_w(3'd0, 3'd1, 3'd2), 32'd0, 32'd0, 4'd5);
+		// mmasa.w m3 += m0 * m1
+		issue_and_commit(enc_mmasa_w(3'd0, 3'd1, 3'd3), 32'd0, 32'd0, 4'd6);
 
+		wait (completed_results >= 6);
+		repeat (10) @(posedge clk_i);
 
 		// ########### STORE RESULTS ###########
 		// mst.w m0, [BASE_ADDR], stride=16 
-		issue_and_commit(enc_mst_w(3'd0), A_BASE, ROW_STRIDE, 4'd5);
-		issue_and_commit(enc_mst_w(3'd1), B_BASE, ROW_STRIDE, 4'd6);
-		issue_and_commit(enc_mst_w(3'd2), C_BASE, ROW_STRIDE, 4'd7);
+		issue_and_commit(enc_mst_w(3'd0), A_BASE, ROW_STRIDE, 4'd7);
+		issue_and_commit(enc_mst_w(3'd1), B_BASE, ROW_STRIDE, 4'd8);
+		issue_and_commit(enc_mst_w(3'd2), C_BASE, ROW_STRIDE, 4'd9);
+		issue_and_commit(enc_mst_w(3'd3), D_BASE, ROW_STRIDE, 4'd10);
 
 		// IDs 3 and 4 are currently disabled (mzero/mmasa), so expect 4 completions.
-		wait (completed_results >= 7);
+		wait (completed_results >= 10);
 		repeat (10) @(posedge clk_i);
 		
 
@@ -415,7 +423,7 @@ module quadrilatero_xif_tb;
 			);
 		end
 
-		$display("\n[TB] Result matrix C (from memory @ 0x%08x):", C_BASE);
+		$display("\n[TB] SpMM Result matrix C (from memory @ 0x%08x):", C_BASE);
 		for (r = 0; r < 4; r = r + 1) begin
 			logic [127:0] rowC;
 			rowC = mem_model[(C_BASE >> 4) + r];
@@ -424,6 +432,18 @@ module quadrilatero_xif_tb;
 				$signed(rowC[63:32]),
 				$signed(rowC[95:64]),
 				$signed(rowC[127:96])
+			);
+		end
+
+		$display("\n[TB] DMM Result matrix D (from memory @ 0x%08x):", D_BASE);
+		for (r = 0; r < 4; r = r + 1) begin
+			logic [127:0] rowD;
+			rowD = mem_model[(D_BASE >> 4) + r];
+			$display("[TB] %0d %0d %0d %0d",
+				$signed(rowD[31:0]),
+				$signed(rowD[63:32]),
+				$signed(rowD[95:64]),
+				$signed(rowD[127:96])
 			);
 		end
 

@@ -28,6 +28,7 @@ package quadrilatero_pkg;
   } datatype_t;
 
   typedef struct packed {
+    logic      is_spmm;
     logic      is_float;
     datatype_t datatype;
   } sa_ctrl_t;

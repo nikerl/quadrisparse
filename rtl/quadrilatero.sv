@@ -204,6 +204,55 @@ module quadrilatero
   logic                                      sa_finished_ack      ;
   logic [xif_pkg::X_ID_WIDTH-1:0]            sa_finished_instr_id ;
 
+  logic                                      sa_dense_wl_ready    ;
+  logic                                      sa_sparse_wl_ready   ;
+  logic                                      sa_use_sparse_q      ;
+  logic                                      sa_active_q          ;
+
+  logic                                      sa_dense_weight_rdata_ready;
+  logic                                      sa_dense_weight_rlast      ;
+  logic [xif_pkg::X_ID_WIDTH-1:0]            sa_dense_input_id          ;
+  logic [xif_pkg::X_ID_WIDTH-1:0]            sa_dense_output_id         ;
+  logic [$clog2(quadrilatero_pkg::N_REGS)-1:0] sa_dense_weight_raddr    ;
+  logic [$clog2(quadrilatero_pkg::N_ROWS)-1:0] sa_dense_weight_rrowaddr ;
+  logic                                      sa_dense_data_rdata_ready  ;
+  logic                                      sa_dense_data_rlast        ;
+  logic [$clog2(quadrilatero_pkg::N_REGS)-1:0] sa_dense_data_raddr      ;
+  logic [$clog2(quadrilatero_pkg::N_ROWS)-1:0] sa_dense_data_rrowaddr   ;
+  logic                                      sa_dense_acc_rdata_ready   ;
+  logic                                      sa_dense_acc_rlast         ;
+  logic [$clog2(quadrilatero_pkg::N_REGS)-1:0] sa_dense_acc_raddr       ;
+  logic [$clog2(quadrilatero_pkg::N_ROWS)-1:0] sa_dense_acc_rrowaddr    ;
+  logic                                      sa_dense_res_we            ;
+  logic                                      sa_dense_res_wlast         ;
+  logic [quadrilatero_pkg::RLEN-1:0]           sa_dense_res_wdata       ;
+  logic [$clog2(quadrilatero_pkg::N_REGS)-1:0] sa_dense_res_waddr       ;
+  logic [$clog2(quadrilatero_pkg::N_ROWS)-1:0] sa_dense_res_wrowaddr    ;
+  logic                                      sa_dense_finished          ;
+  logic [xif_pkg::X_ID_WIDTH-1:0]            sa_dense_finished_instr_id ;
+
+  logic                                      sa_sparse_weight_rdata_ready;
+  logic                                      sa_sparse_weight_rlast      ;
+  logic [xif_pkg::X_ID_WIDTH-1:0]            sa_sparse_input_id          ;
+  logic [xif_pkg::X_ID_WIDTH-1:0]            sa_sparse_output_id         ;
+  logic [$clog2(quadrilatero_pkg::N_REGS)-1:0] sa_sparse_weight_raddr    ;
+  logic [$clog2(quadrilatero_pkg::N_ROWS)-1:0] sa_sparse_weight_rrowaddr ;
+  logic                                      sa_sparse_data_rdata_ready  ;
+  logic                                      sa_sparse_data_rlast        ;
+  logic [$clog2(quadrilatero_pkg::N_REGS)-1:0] sa_sparse_data_raddr      ;
+  logic [$clog2(quadrilatero_pkg::N_ROWS)-1:0] sa_sparse_data_rrowaddr   ;
+  logic                                      sa_sparse_acc_rdata_ready   ;
+  logic                                      sa_sparse_acc_rlast         ;
+  logic [$clog2(quadrilatero_pkg::N_REGS)-1:0] sa_sparse_acc_raddr       ;
+  logic [$clog2(quadrilatero_pkg::N_ROWS)-1:0] sa_sparse_acc_rrowaddr    ;
+  logic                                      sa_sparse_res_we            ;
+  logic                                      sa_sparse_res_wlast         ;
+  logic [quadrilatero_pkg::RLEN-1:0]           sa_sparse_res_wdata       ;
+  logic [$clog2(quadrilatero_pkg::N_REGS)-1:0] sa_sparse_res_waddr       ;
+  logic [$clog2(quadrilatero_pkg::N_ROWS)-1:0] sa_sparse_res_wrowaddr    ;
+  logic                                      sa_sparse_finished          ;
+  logic [xif_pkg::X_ID_WIDTH-1:0]            sa_sparse_finished_instr_id ;
+
 
   // LSU Controller
   logic                       lsu_ctrl_issue_queue_full ;
@@ -705,7 +754,24 @@ module quadrilatero
   //***  SYSTOLIC ARRAY BLOCKS  ***
   //*******************************
 
+  always_ff @(posedge clk_i or negedge rst_ni) begin: sa_mode_seq
+    if (!rst_ni) begin
+      sa_use_sparse_q <= 1'b0;
+      sa_active_q     <= 1'b0;
+    end else begin
+      if (sa_ctrl_start) begin
+        sa_use_sparse_q <= sa_ctrl_issued_instr.sa_ctrl.is_spmm;
+        sa_active_q     <= 1'b1;
+      end else if (sa_finished_ack) begin
+        sa_active_q <= 1'b0;
+      end
+    end
+  end
+
   always_comb begin: sa_block
+    logic sa_select_sparse;
+
+    sa_select_sparse = sa_active_q ? sa_use_sparse_q : sa_ctrl_issued_instr.sa_ctrl.is_spmm;
 
     // From Dispatcher
     sa_ctrl_dispatch                          = dispatcher_dispatch[quadrilatero_pkg::FU_SYSTOLIC_ARRAY];
@@ -715,6 +781,7 @@ module quadrilatero
     sa_ctrl_dispatched_instr.id               = dispatcher_instr_id_out                               ;
     sa_ctrl_dispatched_instr.sa_ctrl.datatype = dispatcher_instr_datatype_out                         ;
     sa_ctrl_dispatched_instr.sa_ctrl.is_float = dispatcher_is_float_out                               ;
+    sa_ctrl_dispatched_instr.sa_ctrl.is_spmm  = dispatcher_is_sparse_out                              ;
 
     // From Register File 
     sa_data_rdata_valid   = rf_seq_rvalid_from_fu[quadrilatero_pkg::SYSTOLIC_ARRAY_D];
@@ -724,6 +791,35 @@ module quadrilatero
     sa_data_rdata         = rf_seq_rdata_from_fu [quadrilatero_pkg::SYSTOLIC_ARRAY_D];
     sa_weight_rdata       = rf_seq_rdata_from_fu [quadrilatero_pkg::SYSTOLIC_ARRAY_W];
     sa_acc_rdata          = rf_seq_rdata_from_fu [quadrilatero_pkg::SYSTOLIC_ARRAY_A];
+
+    sa_ctrl_wl_ready      = sa_select_sparse ? sa_sparse_wl_ready : sa_dense_wl_ready;
+
+    sa_weight_raddr       = sa_select_sparse ? sa_sparse_weight_raddr       : sa_dense_weight_raddr;
+    sa_weight_rrowaddr    = sa_select_sparse ? sa_sparse_weight_rrowaddr    : sa_dense_weight_rrowaddr;
+    sa_weight_rdata_ready = sa_select_sparse ? sa_sparse_weight_rdata_ready : sa_dense_weight_rdata_ready;
+    sa_weight_rlast       = sa_select_sparse ? sa_sparse_weight_rlast       : sa_dense_weight_rlast;
+
+    sa_data_raddr         = sa_select_sparse ? sa_sparse_data_raddr         : sa_dense_data_raddr;
+    sa_data_rrowaddr      = sa_select_sparse ? sa_sparse_data_rrowaddr      : sa_dense_data_rrowaddr;
+    sa_data_rdata_ready   = sa_select_sparse ? sa_sparse_data_rdata_ready   : sa_dense_data_rdata_ready;
+    sa_data_rlast         = sa_select_sparse ? sa_sparse_data_rlast         : sa_dense_data_rlast;
+
+    sa_acc_raddr          = sa_select_sparse ? sa_sparse_acc_raddr          : sa_dense_acc_raddr;
+    sa_acc_rrowaddr       = sa_select_sparse ? sa_sparse_acc_rrowaddr       : sa_dense_acc_rrowaddr;
+    sa_acc_rdata_ready    = sa_select_sparse ? sa_sparse_acc_rdata_ready    : sa_dense_acc_rdata_ready;
+    sa_acc_rlast          = sa_select_sparse ? sa_sparse_acc_rlast          : sa_dense_acc_rlast;
+
+    sa_res_waddr          = sa_select_sparse ? sa_sparse_res_waddr          : sa_dense_res_waddr;
+    sa_res_wrowaddr       = sa_select_sparse ? sa_sparse_res_wrowaddr       : sa_dense_res_wrowaddr;
+    sa_res_wdata          = sa_select_sparse ? sa_sparse_res_wdata          : sa_dense_res_wdata;
+    sa_res_we             = sa_select_sparse ? sa_sparse_res_we             : sa_dense_res_we;
+    sa_res_wlast          = sa_select_sparse ? sa_sparse_res_wlast          : sa_dense_res_wlast;
+
+    sa_input_id           = sa_select_sparse ? sa_sparse_input_id           : sa_dense_input_id;
+    sa_output_id          = sa_select_sparse ? sa_sparse_output_id          : sa_dense_output_id;
+
+    sa_finished           = sa_select_sparse ? sa_sparse_finished           : sa_dense_finished;
+    sa_finished_instr_id  = sa_select_sparse ? sa_sparse_finished_instr_id  : sa_dense_finished_instr_id;
   end
 
   quadrilatero_systolic_array_controller #(
@@ -743,61 +839,109 @@ module quadrilatero
       .issued_instr_o     (sa_ctrl_issued_instr                 )   // issued instruction
   );
 
-  quadrilatero_systolic_array #(
+    quadrilatero_systolic_array #(
       .MESH_WIDTH(MESH_WIDTH),
       .FPU        (FPU      )
-  ) sa_inst (
+    ) sa_dense_inst (
       .clk_i                                                   ,
       .rst_ni                                                  ,
 
-      .start_i                (sa_ctrl_start                  ),
-      .sa_ready_o             (sa_ctrl_wl_ready               ),
+      .start_i                (sa_ctrl_start & ~sa_ctrl_issued_instr.sa_ctrl.is_spmm),
+      .sa_ready_o             (sa_dense_wl_ready              ),
 
-      .data_reg_i             (sa_ctrl_issued_instr.data_reg  ),  // data register
-      .acc_reg_i              (sa_ctrl_issued_instr.acc_reg   ),  // accumulator register
-      .weight_reg_i           (sa_ctrl_issued_instr.weight_reg),  // weight register
-      .id_i                   (sa_ctrl_issued_instr.id        ),  // id of instruction
+      .data_reg_i             (sa_ctrl_issued_instr.data_reg  ),
+      .acc_reg_i              (sa_ctrl_issued_instr.acc_reg   ),
+      .weight_reg_i           (sa_ctrl_issued_instr.weight_reg),
+      .id_i                   (sa_ctrl_issued_instr.id        ),
       .sa_ctrl_i              (sa_ctrl_issued_instr.sa_ctrl   ),
 
-      // Data Read Register Port 
-      .data_raddr_o           (sa_data_raddr                  ),
-      .data_rrowaddr_o        (sa_data_rrowaddr               ),
+      .data_raddr_o           (sa_dense_data_raddr            ),
+      .data_rrowaddr_o        (sa_dense_data_rrowaddr         ),
       .data_rdata_i           (sa_data_rdata                  ),
       .data_rdata_valid_i     (sa_data_rdata_valid            ),
-      .data_rdata_ready_o     (sa_data_rdata_ready            ),  // unused
-      .data_rlast_o           (sa_data_rlast                  ),
+      .data_rdata_ready_o     (sa_dense_data_rdata_ready      ),
+      .data_rlast_o           (sa_dense_data_rlast            ),
 
-      // Weight Read Register Port
-      .weight_raddr_o         (sa_weight_raddr                ),
-      .weight_rrowaddr_o      (sa_weight_rrowaddr             ),
+      .weight_raddr_o         (sa_dense_weight_raddr          ),
+      .weight_rrowaddr_o      (sa_dense_weight_rrowaddr       ),
       .weight_rdata_i         (sa_weight_rdata                ),
       .weight_rdata_valid_i   (sa_weight_rdata_valid          ),
-      .weight_rdata_ready_o   (sa_weight_rdata_ready          ),
-      .weight_rlast_o         (sa_weight_rlast                ),
+      .weight_rdata_ready_o   (sa_dense_weight_rdata_ready    ),
+      .weight_rlast_o         (sa_dense_weight_rlast          ),
 
-      // Accumulator Read Register Port
-      .acc_raddr_o            (sa_acc_raddr                   ),
-      .acc_rrowaddr_o         (sa_acc_rrowaddr                ),
+      .acc_raddr_o            (sa_dense_acc_raddr             ),
+      .acc_rrowaddr_o         (sa_dense_acc_rrowaddr          ),
       .acc_rdata_i            (sa_acc_rdata                   ),
       .acc_rdata_valid_i      (sa_acc_rdata_valid             ),
-      .acc_rdata_ready_o      (sa_acc_rdata_ready             ),
-      .acc_rlast_o            (sa_acc_rlast                   ),
+      .acc_rdata_ready_o      (sa_dense_acc_rdata_ready       ),
+      .acc_rlast_o            (sa_dense_acc_rlast             ),
 
-      // Accumulator Out Write Register Port
-      .res_waddr_o            (sa_res_waddr                   ),
-      .res_wrowaddr_o         (sa_res_wrowaddr                ),
-      .res_wdata_o            (sa_res_wdata                   ),
-      .res_we_o               (sa_res_we                      ),
-      .res_wlast_o            (sa_res_wlast                   ),
+      .res_waddr_o            (sa_dense_res_waddr             ),
+      .res_wrowaddr_o         (sa_dense_res_wrowaddr          ),
+      .res_wdata_o            (sa_dense_res_wdata             ),
+      .res_we_o               (sa_dense_res_we                ),
+      .res_wlast_o            (sa_dense_res_wlast             ),
       .res_wready_i           (sa_res_wready                  ),
 
-      .sa_input_id_o          (sa_input_id                    ),
-      .sa_output_id_o         (sa_output_id                   ),
+      .sa_input_id_o          (sa_dense_input_id              ),
+      .sa_output_id_o         (sa_dense_output_id             ),
 
-      .finished_o             (sa_finished                    ),
-      .finished_ack_i         (sa_finished_ack                ),
-      .finished_instr_id_o    (sa_finished_instr_id           )
-  );
+      .finished_o             (sa_dense_finished              ),
+      .finished_ack_i         (sa_finished_ack & ~sa_use_sparse_q),
+      .finished_instr_id_o    (sa_dense_finished_instr_id     )
+    );
+
+    quadrilatero_systolic_array_sp #(
+      .MESH_WIDTH(MESH_WIDTH),
+      .FPU        (FPU      )
+    ) sa_sparse_inst (
+      .clk_i                                                   ,
+      .rst_ni                                                  ,
+
+      .start_i                (sa_ctrl_start & sa_ctrl_issued_instr.sa_ctrl.is_spmm),
+      .sa_ready_o             (sa_sparse_wl_ready             ),
+
+      .data_reg_i             (sa_ctrl_issued_instr.data_reg  ),
+      .acc_reg_i              (sa_ctrl_issued_instr.acc_reg   ),
+      .weight_reg_i           (sa_ctrl_issued_instr.weight_reg),
+      .id_i                   (sa_ctrl_issued_instr.id        ),
+      .sa_ctrl_i              (sa_ctrl_issued_instr.sa_ctrl   ),
+
+      .data_raddr_o           (sa_sparse_data_raddr           ),
+      .data_rrowaddr_o        (sa_sparse_data_rrowaddr        ),
+      .data_rdata_i           (sa_data_rdata                  ),
+      .data_rdata_valid_i     (sa_data_rdata_valid            ),
+      .data_rdata_ready_o     (sa_sparse_data_rdata_ready     ),
+      .data_rlast_o           (sa_sparse_data_rlast           ),
+
+      .weight_raddr_o         (sa_sparse_weight_raddr         ),
+      .weight_rrowaddr_o      (sa_sparse_weight_rrowaddr      ),
+      .weight_rdata_i         (sa_weight_rdata                ),
+      .weight_rdata_valid_i   (sa_weight_rdata_valid          ),
+      .weight_rdata_ready_o   (sa_sparse_weight_rdata_ready   ),
+      .weight_rlast_o         (sa_sparse_weight_rlast         ),
+
+      .acc_raddr_o            (sa_sparse_acc_raddr            ),
+      .acc_rrowaddr_o         (sa_sparse_acc_rrowaddr         ),
+      .acc_rdata_i            (sa_acc_rdata                   ),
+      .acc_rdata_valid_i      (sa_acc_rdata_valid             ),
+      .acc_rdata_ready_o      (sa_sparse_acc_rdata_ready      ),
+      .acc_rlast_o            (sa_sparse_acc_rlast            ),
+
+      .res_waddr_o            (sa_sparse_res_waddr            ),
+      .res_wrowaddr_o         (sa_sparse_res_wrowaddr         ),
+      .res_wdata_o            (sa_sparse_res_wdata            ),
+      .res_we_o               (sa_sparse_res_we               ),
+      .res_wlast_o            (sa_sparse_res_wlast            ),
+      .res_wready_i           (sa_res_wready                  ),
+
+      .sa_input_id_o          (sa_sparse_input_id             ),
+      .sa_output_id_o         (sa_sparse_output_id            ),
+
+      .finished_o             (sa_sparse_finished             ),
+      .finished_ack_i         (sa_finished_ack & sa_use_sparse_q),
+      .finished_instr_id_o    (sa_sparse_finished_instr_id    )
+    );
  
 
   //********************
