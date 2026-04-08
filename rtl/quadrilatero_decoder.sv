@@ -99,7 +99,18 @@ module quadrilatero_decoder
       quadrilatero_instr_pkg::MMASA_W: begin
         instr_valid_o            = '1;
         exec_unit_o              = quadrilatero_pkg::FU_SYSTOLIC_ARRAY;
-        rf_read_regs_o[0]        = instr_i[20:18];  // weight 
+        rf_read_regs_o[0]        = instr_i[20:18];  // weight
+        rf_read_regs_o[1]        = instr_i[23:21];  // data
+        rf_read_regs_o[2]        = instr_i[17:15];  // accumulator
+        rf_writeback_reg_o       = instr_i[17:15];  // accumulator
+        n_matrix_operands_read_o = 3;
+        rf_writeback_o           = '1;
+        datatype_o               = quadrilatero_pkg::SIZE_32;
+      end
+      quadrilatero_instr_pkg::SPMAC_W: begin
+        instr_valid_o            = '1;
+        exec_unit_o              = quadrilatero_pkg::FU_SYSTOLIC_ARRAY;
+        rf_read_regs_o[0]        = instr_i[20:18];  // weight
         rf_read_regs_o[1]        = instr_i[23:21];  // data
         rf_read_regs_o[2]        = instr_i[17:15];  // accumulator
         rf_writeback_reg_o       = instr_i[17:15];  // accumulator
