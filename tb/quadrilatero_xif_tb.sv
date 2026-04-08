@@ -160,6 +160,25 @@ module quadrilatero_xif_tb;
 		end
 	endfunction
 
+	function automatic logic [31:0] enc_spmac_w(
+		input logic [2:0] a_reg,
+		input logic [2:0] b_reg,
+		input logic [2:0] acc_reg
+	);
+		logic [31:0] instr;
+		begin
+			instr         = '0;
+			instr[31:24]  = 8'b01000000;
+			instr[23:21]  = b_reg;
+			instr[20:18]  = a_reg;
+			instr[17:15]  = acc_reg;
+			instr[14:12]  = 3'b000;
+			instr[11:7]   = 5'b10000;
+			instr[6:0]    = 7'b0101011;
+			return instr;
+		end
+	endfunction
+
 	task automatic issue_and_commit(
 		input logic [31:0] instr,
 		input logic [31:0] rs0,
@@ -320,17 +339,17 @@ module quadrilatero_xif_tb;
 
 
 		// Dense matrix B, row-major.
-		mem_model[(B_BASE >> 4) + 0] = pack_row_lsb_first(32'd0, 32'd0, 32'd0, 32'd0);
-		mem_model[(B_BASE >> 4) + 1] = pack_row_lsb_first(32'd1, 32'd1, 32'd1, 32'd1);
-		mem_model[(B_BASE >> 4) + 2] = pack_row_lsb_first(32'd2, 32'd2, 32'd2, 32'd2);
-		mem_model[(B_BASE >> 4) + 3] = pack_row_lsb_first(32'd3, 32'd3, 32'd3, 32'd3);
-		mem_model[(B_BASE >> 4) + 4] = pack_row_lsb_first(32'd4, 32'd4, 32'd4, 32'd4);
-		mem_model[(B_BASE >> 4) + 5] = pack_row_lsb_first(32'd5, 32'd5, 32'd5, 32'd5);
-		mem_model[(B_BASE >> 4) + 6] = pack_row_lsb_first(32'd6, 32'd6, 32'd6, 32'd6);
+		mem_model[(B_BASE >> 4) + 0] = pack_row_lsb_first(32'd1, 32'd7, 32'd5, 32'd9); //0
+		mem_model[(B_BASE >> 4) + 1] = pack_row_lsb_first(32'd4, 32'd4, 32'd4, 32'd4); //1
+		mem_model[(B_BASE >> 4) + 2] = pack_row_lsb_first(32'd5, 32'd5, 32'd5, 32'd5); //2
+		mem_model[(B_BASE >> 4) + 3] = pack_row_lsb_first(32'd4, 32'd6, 32'd3, 32'd5); //3
+		mem_model[(B_BASE >> 4) + 4] = pack_row_lsb_first(32'd7, 32'd2, 32'd6, 32'd4); //4
+		mem_model[(B_BASE >> 4) + 5] = pack_row_lsb_first(32'd6, 32'd6, 32'd6, 32'd6); //5
+		mem_model[(B_BASE >> 4) + 6] = pack_row_lsb_first(32'd3, 32'd1, 32'd7, 32'd9); //6
 
 		// Sparse tile: 4 non-zero values and their column indices (one SPLD fetch each)
 		mem_model[(VAL_BASE >> 4)] = pack_row_lsb_first(32'd1, 32'd4, 32'd6, 32'd9);
-		mem_model[(COL_BASE >> 4)] = pack_row_lsb_first(32'd0, 32'd3, 32'd1, 32'd2);
+		mem_model[(COL_BASE >> 4)] = pack_row_lsb_first(32'd0, 32'd3, 32'd4, 32'd6);
 
 		repeat (6) @(posedge clk_i);
 		rst_ni = 1'b1;
@@ -356,8 +375,8 @@ module quadrilatero_xif_tb;
 		// mzero m2
 		issue_and_commit(enc_mzero(3'd2), 32'd0, 32'd0, 4'd3);
 
-		// mmasa.w m2 += m0 * m1
-		issue_and_commit(enc_mmasa_w(3'd0, 3'd1, 3'd2), 32'd0, 32'd0, 4'd4);
+		// spmac.w m2 += m0 * m1, run spmac instead of mmasa (same behaviour as of now)
+		issue_and_commit(enc_spmac_w(3'd0, 3'd1, 3'd2), 32'd0, 32'd0, 4'd4);
 
 
 		// ########### STORE RESULTS ###########
@@ -367,7 +386,7 @@ module quadrilatero_xif_tb;
 		issue_and_commit(enc_mst_w(3'd2), C_BASE, ROW_STRIDE, 4'd7);
 
 		// IDs 3 and 4 are currently disabled (mzero/mmasa), so expect 4 completions.
-		wait (completed_results >= 6);
+		wait (completed_results >= 7);
 		repeat (10) @(posedge clk_i);
 		
 
