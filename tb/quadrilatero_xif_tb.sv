@@ -72,6 +72,7 @@ module quadrilatero_xif_tb;
 	} instr_timing_t;
 
 	instr_timing_t instr_timing [bit[$clog2($size(x_issue_req.id)*8)-1:0]];
+	string instr_name [bit[$clog2($size(x_issue_req.id)*8)-1:0]];
 
 	function automatic logic [31:0] enc_mld_w(input logic [2:0] md);
 		logic [31:0] instr;
@@ -265,8 +266,8 @@ module quadrilatero_xif_tb;
 		end else if (x_result_valid && x_result_ready) begin
 			completed_results <= completed_results + 1;
 			instr_timing[x_result.id].complete_cycle = cycle_count;
-			$display("[TB] completed instruction id=%0d (cycle %0d, latency=%0d cycles)", 
-				x_result.id, cycle_count, 
+			$display("[TB] completed instruction %s (cycle %0d, latency=%0d cycles)", 
+				instr_name[x_result.id], cycle_count, 
 				instr_timing[x_result.id].complete_cycle - instr_timing[x_result.id].issue_cycle);
 		end
 	end
@@ -275,7 +276,19 @@ module quadrilatero_xif_tb;
 	always @(posedge clk_i) begin
 		if (x_issue_valid && x_issue_ready) begin
 			instr_timing[x_issue_req.id].issue_cycle = cycle_count;
-			$display("[TB] issued instruction id=%0d (cycle %0d)", x_issue_req.id, cycle_count);
+			casez (x_issue_req.instr)
+				quadrilatero_instr_pkg::SPLD_W  :  instr_name[x_issue_req.id] = "SPLD_W" 				;
+				quadrilatero_instr_pkg::DLD_W   :  instr_name[x_issue_req.id] = "DLD_W" 				;
+				quadrilatero_instr_pkg::MLD_W   :  instr_name[x_issue_req.id] = "MLD_W"  				;
+				quadrilatero_instr_pkg::SPMAC_W :  instr_name[x_issue_req.id] = "SPMAC_W"				;
+				quadrilatero_instr_pkg::MMASA_W :  instr_name[x_issue_req.id] = "MMASA_W"				;
+				quadrilatero_instr_pkg::MZERO   :  instr_name[x_issue_req.id] = "MZERO"  				;
+				quadrilatero_instr_pkg::MST_W   :  instr_name[x_issue_req.id] = "MST_W"  				;
+				quadrilatero_instr_pkg::MST_B   :  instr_name[x_issue_req.id] = "MST_B"  				;
+				quadrilatero_instr_pkg::MST_H   :  instr_name[x_issue_req.id] = "MSTH"   				;
+				default					        :  instr_name[x_issue_req.id] = "UNKNOWN_INSTRUCTION" 	;
+			endcase
+			$display("[TB] issued %s id=%0d (cycle: %0d)", instr_name[x_issue_req.id], x_issue_req.id, cycle_count);
 		end
 	end
 
@@ -337,15 +350,16 @@ module quadrilatero_xif_tb;
 			mem_model[i] = '0;
 		end
 
+		//===========================================================================
+		// 							Hardcoded Memory
+		//===========================================================================
 
 		// Dense matrix B, row-major.
-		mem_model[(B_BASE >> 4) + 0] = pack_row_lsb_first(32'd0, 32'd0, 32'd0, 32'd0);
+		mem_model[(B_BASE >> 4) + 0] = pack_row_lsb_first(32'd1, 32'd1, 32'd1, 32'd1);
 		mem_model[(B_BASE >> 4) + 1] = pack_row_lsb_first(32'd1, 32'd1, 32'd1, 32'd1);
 		mem_model[(B_BASE >> 4) + 2] = pack_row_lsb_first(32'd2, 32'd2, 32'd2, 32'd2);
 		mem_model[(B_BASE >> 4) + 3] = pack_row_lsb_first(32'd3, 32'd3, 32'd3, 32'd3);
-		mem_model[(B_BASE >> 4) + 4] = pack_row_lsb_first(32'd4, 32'd4, 32'd4, 32'd4);
-		mem_model[(B_BASE >> 4) + 5] = pack_row_lsb_first(32'd5, 32'd5, 32'd5, 32'd5);
-		mem_model[(B_BASE >> 4) + 6] = pack_row_lsb_first(32'd6, 32'd6, 32'd6, 32'd6);
+
 
 		// Sparse tile: 4 non-zero values and their column indices (one SPLD fetch each)
 		mem_model[(VAL_BASE >> 4)] = pack_row_lsb_first(32'd1, 32'd4, 32'd6, 32'd9);
@@ -355,9 +369,9 @@ module quadrilatero_xif_tb;
 		rst_ni = 1'b1;
 		repeat (4) @(posedge clk_i);
 
-
-		// ########### LOAD OPERAND MATRICIES ###########
-		// mld.w m0, [A_BASE], stride=16
+		//===========================================================================
+		// 							Instruction Issued
+		//===========================================================================
 		
 		issue_and_commit(enc_spld_w(3'd0), VAL_BASE, COL_BASE, 4'd1);
 
@@ -371,8 +385,6 @@ module quadrilatero_xif_tb;
 		repeat (10) @(posedge clk_i);  
 
 
-		// ########### PERFORM MATMUL ###########
-		// mzero m2
 		issue_and_commit(enc_mzero(3'd2), 32'd0, 32'd0, 4'd3);
 
 		// mmasa.w m2 += m0 * m1
@@ -390,9 +402,12 @@ module quadrilatero_xif_tb;
 		// IDs 3 and 4 are currently disabled (mzero/mmasa), so expect 4 completions.
 		wait (completed_results >= 7);
 		repeat (10) @(posedge clk_i);
+
+
+		//===========================================================================
+		// 					Final prints of the Matrix registers
+		//===========================================================================
 		
-
-
 		$display("\n[TB] Sparse matrix A (from memory @ 0x%08x):", A_BASE);
 		for (r = 0; r < 4; r = r + 1) begin
 			logic [127:0] rowA;
