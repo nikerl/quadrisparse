@@ -217,7 +217,6 @@ module quadrilatero_systolic_array #(
   end
 
   always_comb begin: ctrl_block
-    // spmac: acc is only requested on ff_counter==0; subsequent cycles don't need it
     valid = weight_rdata_valid_i & data_rdata_valid_i & acc_rdata_valid_i;
     clear = ~ff_active_q & ~fs_active_q & ~dr_active_q;
 
