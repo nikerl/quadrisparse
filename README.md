@@ -26,6 +26,12 @@ make run
 
 All instructions share `7'b0101011` (CUSTOM 1) as the major opcode, and func3 is `3'b000`.
 
+### Arithmetic Instructions
+| mnemonic  |31–27 | 26–25 | 24 | 23–21 | 20–18 | 17–15 | 14–12 | 11–10 | 9–7 | 6–0 |
+| ----- | ---- | --- | ---- | ----- | ----- | ----- | ----- | --- | --- | -- |
+| spmac.w | 11110 | 00 | 0 | ms2 | ms1 | md | func3 | 10 | 000 | major opcode
+
+### Memory Instructions
 | mnemonic |31–27 |26–25 |24–18 |17–15 |14–12 |11–10 |9–7 |6–0 | 
 | ------- | ---- | ---- |----- | ---- | ---- | ---- | -- | -- |
 | spld.w | 00100	|00 | 0000000 | nnz to load	|func3	|10	|md	|major opcode	|
