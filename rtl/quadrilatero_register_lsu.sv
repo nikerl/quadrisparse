@@ -57,6 +57,7 @@ module quadrilatero_register_lsu #(
     input  logic [                   31:0] address_i          ,  // address value
     input  logic [     $clog2(N_REGS)-1:0] operand_reg_i      ,  // destination register
     input  logic [     $clog2(N_REGS)-1:0] index_reg_i        ,  // dense-load row-index source register
+    input  logic [                    2:0] nnz_to_load_i      ,  // sparse-load nnz count from instruction[17:15]
     input  logic [xif_pkg::X_ID_WIDTH-1:0] instr_id_i         ,  // instruction id
     input  logic [                   31:0] n_bytes_cols_i     ,  // we always fetch the entire row and then only take the elements we need 
     input  logic [                   31:0] n_rows_i           ,
@@ -69,6 +70,7 @@ module quadrilatero_register_lsu #(
 );
 
   localparam MAX_EL_PER_ROW = RLEN / BUS_WIDTH;
+  localparam int unsigned EL_WIDTH = RLEN / N_ROWS;
 
   logic finished;
   logic [xif_pkg::X_ID_WIDTH-1:0] back_id_q;
@@ -90,6 +92,8 @@ module quadrilatero_register_lsu #(
   logic [RLEN-1:0] store_fifo_data;
 
   logic [RLEN-1:0] data_mask;
+  logic [RLEN-1:0] sparse_lane_mask;
+  logic [$clog2(N_ROWS+1)-1:0] sparse_nnz_clamped;
   logic load_fifo_valid;
   logic busy;
   logic start;
@@ -137,6 +141,13 @@ module quadrilatero_register_lsu #(
   always_comb begin: write_to_RF
       // Default assignments
     data_mask  = '1 << (8 * n_bytes_cols_i);
+    sparse_lane_mask  = '0;
+    sparse_nnz_clamped = (nnz_to_load_i > N_ROWS) ? $clog2(N_ROWS+1)'(N_ROWS) : $clog2(N_ROWS+1)'(nnz_to_load_i);
+    for (int lane = 0; lane < N_ROWS; lane++) begin
+      if (lane < sparse_nnz_clamped) begin
+        sparse_lane_mask[lane*EL_WIDTH +: EL_WIDTH] = '1;
+      end
+    end
       // Default / force for sparse
     we_o       = (load_fifo_data_available | (is_sparse_i & counter_q[$clog2(N_ROWS)-1])) & ~mask_req;
     waddr_o    = waddr_q;
@@ -145,7 +156,7 @@ module quadrilatero_register_lsu #(
     wlast_o    = (counter_q == $clog2(N_ROWS)'(N_ROWS - 1)) && we_o && wready_i;
     if (is_sparse_i) begin
         wrowaddr_o = counter_q;
-        wdata_o = load_fifo_data_available ? load_fifo_data : '0;
+      wdata_o = load_fifo_data_available ? (load_fifo_data & sparse_lane_mask) : '0;
     end
   end
 

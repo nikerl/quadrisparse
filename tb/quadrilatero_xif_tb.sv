@@ -153,11 +153,12 @@ module quadrilatero_xif_tb;
 		end
 	endfunction
 
-	function automatic logic [31:0] enc_spld_w(input logic [2:0] md);
+	function automatic logic [31:0] enc_spld_w(input logic [2:0] md, input logic [2:0] nnz_to_load);
 		logic [31:0] instr;
 		begin
 			instr         = '0;
 			instr[31:25]  = 7'b0010000; // funct7
+			instr[17:15]  = nnz_to_load;     
 			instr[14:12]  = 3'b000;     // funct3
 			instr[11:10]  = 2'b10;
 			instr[9:7]    = md;         // destination reg
@@ -552,14 +553,14 @@ module quadrilatero_xif_tb;
 			end
 
 			for (k = 0; k < K_PANELS; k++) begin
-				issue_and_commit(enc_spld_w(3'd0),
+				issue_and_commit(enc_spld_w(3'd0, 3'd4),
 					VAL_BASE + 32'((rp     * K_PANELS + k) * 16),
 					COL_BASE + 32'((rp     * K_PANELS + k) * 16),
 					next_id); next_id++; issued_cnt++;
 				wait (completed_results >= issued_cnt);
 				repeat (2) @(posedge clk_i);
 
-				issue_and_commit(enc_spld_w(3'd2),
+				issue_and_commit(enc_spld_w(3'd2, 3'd4),
 					VAL_BASE + 32'(((rp+1) * K_PANELS + k) * 16),
 					COL_BASE + 32'(((rp+1) * K_PANELS + k) * 16),
 					next_id); next_id++; issued_cnt++;

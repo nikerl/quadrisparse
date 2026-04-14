@@ -178,7 +178,8 @@ module quadrilatero_decoder
       quadrilatero_instr_pkg::SPLD_W: begin
         instr_valid_o            = '1;
         exec_unit_o              = quadrilatero_pkg::FU_LSU;
-        rf_read_regs_o           = instr_i[20:18];
+        rf_read_regs_o[0]        = instr_i[20:18];
+        rf_read_regs_o[2]        = instr_i[17:15];
         rf_writeback_reg_o       = instr_i[9:7];
         datatype_o               = quadrilatero_pkg::SIZE_32;
         rf_writeback_o           = '1;
