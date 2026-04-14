@@ -68,6 +68,14 @@ module quadrilatero_xif_tb;
 	logic				read_pending_q;
 	logic [31:0]		read_addr_q;
 
+	logic [31:0] tempmem [0:4096]; // Change size if needed
+	int idx;
+	int mem_fd;
+	int scan_rc;
+	logic [31:0] scan_word;
+	int unsigned word_count;
+	int unsigned b_rows;
+
 	int unsigned completed_results;
 	integer r, rp, cp, k, issued_cnt;
 	logic [3:0] next_id;
@@ -232,6 +240,57 @@ module quadrilatero_xif_tb;
 	  return {e3, e2, e1, e0};
 	endfunction
 
+	function automatic void load_data_into_mem(input logic [31:0] addr, input string filename);
+		// Load 32-bit words and pack them into 128-bit memory rows at addr.
+		word_count = 0;
+		mem_fd = $fopen(filename, "r");
+		if (mem_fd == 0) begin
+			$fatal(1, "[TB] Failed to open data file: %s", filename);
+		end
+
+		while (!$feof(mem_fd) && (word_count < $size(tempmem))) begin
+			// Take in 32 bit hex words, use %d for decimal
+			scan_rc = $fscanf(mem_fd, "%h\n", scan_word);
+			if (scan_rc == 1) begin
+				tempmem[word_count] = scan_word;
+				word_count++;
+			end else begin
+				void'($fgetc(mem_fd));
+			end
+		end
+		$fclose(mem_fd);
+
+		if (word_count == 0) begin
+			$fatal(1, "[TB] data file %s is empty", filename);
+		end
+
+		b_rows = word_count / 4;
+		if (((addr >> 4) + b_rows) > 256) begin
+			$fatal(1, "[TB] preload out of bounds for %s: addr=0x%08x rows=%0d", filename, addr, b_rows);
+		end
+
+		for (idx = 0; idx < b_rows; idx++) begin
+			mem_model[(addr >> 4) + idx] = pack_row_lsb_first(
+				tempmem[idx*4],
+				tempmem[idx*4 + 1],
+				tempmem[idx*4 + 2],
+				tempmem[idx*4 + 3]
+			);
+		end
+		
+		if (word_count % 4) begin
+			mem_model[(addr >> 4) + b_rows] = pack_row_lsb_first(
+				(word_count > b_rows*4) ? tempmem[b_rows*4] : 32'd0,
+				(word_count > b_rows*4 + 1) ? tempmem[b_rows*4 + 1] : 32'd0,
+				(word_count > b_rows*4 + 2) ? tempmem[b_rows*4 + 2] : 32'd0,
+				(word_count > b_rows*4 + 3) ? tempmem[b_rows*4 + 3] : 32'd0
+			);
+		end
+
+		$display("[TB] Loaded %s at 0x%08x: %0d words (%0d rows)", filename, addr, word_count, b_rows);
+	endfunction	
+	
+
 	// Clock generation and cycle counting
 	initial begin
 		clk_i = 1'b0;
@@ -387,6 +446,12 @@ module quadrilatero_xif_tb;
 		//===========================================================================
 		// Build reference matrices (pad = 0)
 		//===========================================================================
+		// Sparse tile: 4 non-zero values and their column indices (one SPLD fetch each)
+		/* load_data_into_mem(VAL_BASE, "mat_sp_val_8_0.5.hex");
+		load_data_into_mem(COL_BASE, "mat_sp_col_8_0.5.hex");
+		load_data_into_mem(ROW_BASE, "mat_sp_row_8_0.5.hex");
+		// Dense matrix B, row-major.
+		load_data_into_mem(B_BASE, "mat_d_8.hex"); */
 
 		// Sparse A column indices: with K=NNZ_PER_ROW every row is dense (cols 0..K-1)
 		for (int i = 0; i < N_ROWS; i++)
