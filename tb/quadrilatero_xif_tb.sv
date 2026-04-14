@@ -12,12 +12,16 @@ module quadrilatero_xif_tb;
 	import xif_pkg::*;
 
 	localparam int CLK_PERIOD_NS = 10;
-	localparam logic [31:0] A_BASE = 32'h0000_0000;
-	localparam logic [31:0] B_BASE = 32'h0000_0100;
-	localparam logic [31:0] C_BASE = 32'h0000_0200;
-	localparam logic [31:0] VAL_BASE = 32'h0000_0300;
-	localparam logic [31:0] COL_BASE = 32'h0000_0400;
-	localparam logic [31:0] ROW_STRIDE = 32'd16;
+	localparam int N_ROWS     = 8;  // rows of sparse A
+	localparam int N_COL_PAN  = 2;  // col panels of B (B_cols / 4)
+	localparam int K_PANELS   = 1;  // non-zero panels per sparse row (NNZ_per_row / 4)
+	localparam logic [31:0] B_BASE        = 32'h0000_0100;
+	localparam logic [31:0] VAL_BASE      = 32'h0000_0300;
+	localparam logic [31:0] COL_BASE      = 32'h0000_0400;
+	localparam logic [31:0] C_LEFT_BASE   = 32'h0000_0800;
+	localparam logic [31:0] C_RIGHT_BASE  = 32'h0000_0C00;
+	localparam logic [31:0] ROW_STRIDE    = 32'd16;
+	localparam logic [31:0] B_STRIDE      = 32'd32;
 
 	logic clk_i;
 	logic rst_ni;
@@ -56,12 +60,14 @@ module quadrilatero_xif_tb;
 	logic				x_result_ready;
 	x_result_t			x_result;
 
-	logic [127:0]		mem_model [0:255];
+	logic [127:0]		mem_model [0:511];
 	logic				read_pending_q;
 	logic [31:0]		read_addr_q;
 
 	int unsigned completed_results;
-	integer r;
+	integer r, rp, cp, k, issued_cnt;
+	logic [3:0] next_id;
+	logic [31:0] C_col_base [2];
 
 	// Cycle tracking for latency analysis
 	longint unsigned cycle_count = 0;
@@ -73,6 +79,10 @@ module quadrilatero_xif_tb;
 
 	instr_timing_t instr_timing [bit[$clog2($size(x_issue_req.id)*8)-1:0]];
 	string instr_name [bit[$clog2($size(x_issue_req.id)*8)-1:0]];
+
+	//===========================================================================
+	// 							Instruction encodings
+	//===========================================================================
 
 	function automatic logic [31:0] enc_mld_w(input logic [2:0] md);
 		logic [31:0] instr;
@@ -346,7 +356,7 @@ module quadrilatero_xif_tb;
 		x_mem_result        = '0;
 		x_result_ready      = 1'b1;
 
-		for (int i = 0; i < 256; i++) begin
+		for (int i = 0; i < 512; i++) begin
 			mem_model[i] = '0;
 		end
 
@@ -354,16 +364,39 @@ module quadrilatero_xif_tb;
 		// 							Hardcoded Memory
 		//===========================================================================
 
-		// Dense matrix B, row-major.
-		mem_model[(B_BASE >> 4) + 0] = pack_row_lsb_first(32'd1, 32'd1, 32'd1, 32'd1);
-		mem_model[(B_BASE >> 4) + 1] = pack_row_lsb_first(32'd1, 32'd1, 32'd1, 32'd1);
-		mem_model[(B_BASE >> 4) + 2] = pack_row_lsb_first(32'd2, 32'd2, 32'd2, 32'd2);
-		mem_model[(B_BASE >> 4) + 3] = pack_row_lsb_first(32'd3, 32'd3, 32'd3, 32'd3);
+		for (int i = 0; i < 8; i++) begin
+			mem_model[(B_BASE >> 4) + i*2 + 0] = pack_row_lsb_first(i+1, i+1, i+1, i+1);
+			mem_model[(B_BASE >> 4) + i*2 + 1] = pack_row_lsb_first(i+1, i+1, i+1, i+1);
+		end
 
-
-		// Sparse tile: 4 non-zero values and their column indices (one SPLD fetch each)
-		mem_model[(VAL_BASE >> 4)] = pack_row_lsb_first(32'd1, 32'd4, 32'd6, 32'd9);
-		mem_model[(COL_BASE >> 4)] = pack_row_lsb_first(32'd0, 32'd3, 32'd1, 32'd2);
+		begin
+			automatic logic [31:0] val_flat [32] = '{
+				1, 2, 3, 4,
+				1, 2, 3, 4,
+				1, 2, 3, 4,
+				1, 2, 3, 4,
+				1, 2, 3, 4,
+				1, 2, 3, 4,
+				1, 2, 3, 4,
+				1, 2, 3, 4
+			};
+			automatic logic [31:0] col_flat [32] = '{
+				0, 2, 4, 6,
+				1, 3, 5, 7,
+				0, 2, 4, 6,
+				1, 3, 5, 7,
+				0, 2, 4, 6,
+				1, 3, 5, 7,
+				0, 2, 4, 6,
+				1, 3, 5, 7
+			};
+			for (int i = 0; i < 8; i++) begin
+				mem_model[(VAL_BASE >> 4) + i] = pack_row_lsb_first(
+					val_flat[i*4+0], val_flat[i*4+1], val_flat[i*4+2], val_flat[i*4+3]);
+				mem_model[(COL_BASE >> 4) + i] = pack_row_lsb_first(
+					col_flat[i*4+0], col_flat[i*4+1], col_flat[i*4+2], col_flat[i*4+3]);
+			end
+		end
 
 		repeat (6) @(posedge clk_i);
 		rst_ni = 1'b1;
@@ -372,75 +405,90 @@ module quadrilatero_xif_tb;
 		//===========================================================================
 		// 							Instruction Issued
 		//===========================================================================
-		
-		issue_and_commit(enc_spld_w(3'd0), VAL_BASE, COL_BASE, 4'd1);
 
-		wait (completed_results >= 1); // make sure SPLD is fully done
-		repeat (10) @(posedge clk_i);   // optional small delay for safety
+		issued_cnt    = 0;
+		next_id       = 4'd0;
+		C_col_base[0] = C_LEFT_BASE;
+		C_col_base[1] = C_RIGHT_BASE;
 
-		// dld.w m1, [B_BASE], stride=16, index_reg=m0
-		issue_and_commit(enc_dld_w(3'd1, 3'd0), B_BASE, ROW_STRIDE, 4'd2);
+		for (rp = 0; rp < N_ROWS; rp += 2) begin
 
-		wait (completed_results >= 2);
-		repeat (10) @(posedge clk_i);  
+			for (int acc = 0; acc < 2*N_COL_PAN; acc++) begin
+				issue_and_commit(enc_mzero(3'(4 + acc)), 32'd0, 32'd0, next_id); next_id++; issued_cnt++;
+			end
 
+			for (k = 0; k < K_PANELS; k++) begin
+				issue_and_commit(enc_spld_w(3'd0),
+					VAL_BASE + 32'((rp     * K_PANELS + k) * 16),
+					COL_BASE + 32'((rp     * K_PANELS + k) * 16),
+					next_id); next_id++; issued_cnt++;
+				wait (completed_results >= issued_cnt);
+				repeat (2) @(posedge clk_i);
 
-		issue_and_commit(enc_mzero(3'd2), 32'd0, 32'd0, 4'd3);
+				issue_and_commit(enc_spld_w(3'd2),
+					VAL_BASE + 32'(((rp+1) * K_PANELS + k) * 16),
+					COL_BASE + 32'(((rp+1) * K_PANELS + k) * 16),
+					next_id); next_id++; issued_cnt++;
+				wait (completed_results >= issued_cnt);
+				repeat (2) @(posedge clk_i);
 
-		// mmasa.w m2 += m0 * m1
-		// issue_and_commit(enc_mmasa_w(3'd0, 3'd1, 3'd2), 32'd0, 32'd0, 4'd4);
+				for (cp = 0; cp < N_COL_PAN; cp++) begin
+					// Gather B panel for row rp
+					issue_and_commit(enc_dld_w(3'd1, 3'd0), B_BASE + 32'(cp * 16), B_STRIDE, next_id); next_id++; issued_cnt++;
+					wait (completed_results >= issued_cnt); repeat (2) @(posedge clk_i);
 
-		issue_and_commit(enc_spmac_w(3'd0, 3'd1, 3'd2), 32'd0, 32'd0, 4'd4);
+					// SPMAC row rp — pipeline with DLD for row rp+1
+					issue_and_commit(enc_spmac_w(3'd0, 3'd1, 3'(4 + cp)), 32'd0, 32'd0, next_id); next_id++; issued_cnt++;
 
+					// Gather B panel for row rp+1 — overlaps with SPMAC above
+					issue_and_commit(enc_dld_w(3'd3, 3'd2), B_BASE + 32'(cp * 16), B_STRIDE, next_id); next_id++; issued_cnt++;
+					wait (completed_results >= issued_cnt); repeat (2) @(posedge clk_i);
 
-		// ########### STORE RESULTS ###########
-		// mst.w m0, [BASE_ADDR], stride=16 
-		issue_and_commit(enc_mst_w(3'd0), A_BASE, ROW_STRIDE, 4'd5);
-		issue_and_commit(enc_mst_w(3'd1), B_BASE, ROW_STRIDE, 4'd6);
-		issue_and_commit(enc_mst_w(3'd2), C_BASE, ROW_STRIDE, 4'd7);
+					// SPMAC row rp+1
+					issue_and_commit(enc_spmac_w(3'd2, 3'd3, 3'(4 + N_COL_PAN + cp)), 32'd0, 32'd0, next_id); next_id++; issued_cnt++;
+					wait (completed_results >= issued_cnt); repeat (2) @(posedge clk_i);
+				end
+			end
 
-		// IDs 3 and 4 are currently disabled (mzero/mmasa), so expect 4 completions.
-		wait (completed_results >= 7);
+			for (cp = 0; cp < N_COL_PAN; cp++) begin
+				issue_and_commit(enc_mst_w(3'(4 + cp)),             C_col_base[cp] + 32'(rp       * 16), ROW_STRIDE, next_id); next_id++; issued_cnt++;
+				wait (completed_results >= issued_cnt); repeat (2) @(posedge clk_i);
+				issue_and_commit(enc_mst_w(3'(4 + N_COL_PAN + cp)), C_col_base[cp] + 32'((rp + 1) * 16), ROW_STRIDE, next_id); next_id++; issued_cnt++;
+				wait (completed_results >= issued_cnt); repeat (2) @(posedge clk_i);
+			end
+
+		end
+
 		repeat (10) @(posedge clk_i);
-
 
 		//===========================================================================
 		// 					Final prints of the Matrix registers
 		//===========================================================================
-		
-		$display("\n[TB] Sparse matrix A (from memory @ 0x%08x):", A_BASE);
-		for (r = 0; r < 4; r = r + 1) begin
-			logic [127:0] rowA;
-			rowA = mem_model[(A_BASE >> 4) + r];
-			$display("[TB] %0d %0d %0d %0d",
-				$signed(rowA[31:0]),
-				$signed(rowA[63:32]),
-				$signed(rowA[95:64]),
-				$signed(rowA[127:96])
+
+		$display("\n[TB] Dense matrix B (8x8) @ 0x%08x:", B_BASE);
+		for (r = 0; r < 8; r = r + 1) begin
+			logic [127:0] lo, hi;
+			lo = mem_model[(B_BASE >> 4) + r*2 + 0];
+			hi = mem_model[(B_BASE >> 4) + r*2 + 1];
+			$display("[TB]  %4d %4d %4d %4d | %4d %4d %4d %4d",
+				$signed(lo[31:0]),  $signed(lo[63:32]),
+				$signed(lo[95:64]), $signed(lo[127:96]),
+				$signed(hi[31:0]),  $signed(hi[63:32]),
+				$signed(hi[95:64]), $signed(hi[127:96])
 			);
 		end
 
-		$display("\n[TB] Dense matrix B (from memory @ 0x%08x):", B_BASE);
-		for (r = 0; r < 4; r = r + 1) begin
-			logic [127:0] rowB;
-			rowB = mem_model[(B_BASE >> 4) + r];
-			$display("[TB] %0d %0d %0d %0d",
-				$signed(rowB[31:0]),
-				$signed(rowB[63:32]),
-				$signed(rowB[95:64]),
-				$signed(rowB[127:96])
-			);
-		end
-
-		$display("\n[TB] Result matrix C (from memory @ 0x%08x):", C_BASE);
-		for (r = 0; r < 4; r = r + 1) begin
-			logic [127:0] rowC;
-			rowC = mem_model[(C_BASE >> 4) + r];
-			$display("[TB] %0d %0d %0d %0d",
-				$signed(rowC[31:0]),
-				$signed(rowC[63:32]),
-				$signed(rowC[95:64]),
-				$signed(rowC[127:96])
+		$display("\n[TB] Result C (8x8): cols 0-3 @ 0x%08x | cols 4-7 @ 0x%08x",
+			C_LEFT_BASE, C_RIGHT_BASE);
+		for (r = 0; r < 8; r = r + 1) begin
+			logic [127:0] lo, hi;
+			lo = mem_model[(C_LEFT_BASE  >> 4) + r];
+			hi = mem_model[(C_RIGHT_BASE >> 4) + r];
+			$display("[TB]  %4d %4d %4d %4d | %4d %4d %4d %4d",
+				$signed(lo[31:0]),  $signed(lo[63:32]),
+				$signed(lo[95:64]), $signed(lo[127:96]),
+				$signed(hi[31:0]),  $signed(hi[63:32]),
+				$signed(hi[95:64]), $signed(hi[127:96])
 			);
 		end
 
