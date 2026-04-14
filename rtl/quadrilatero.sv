@@ -832,6 +832,7 @@ module quadrilatero
     lsu_ctrl_dispatched_instr.is_sparse   = dispatcher_is_sparse_out                                         ;
     lsu_ctrl_dispatched_instr.operand_reg = (dispatcher_is_store_out) ? dispatcher_reg_ms1: dispatcher_reg_md;  // destination register
     lsu_ctrl_dispatched_instr.index_reg   = dispatcher_reg_ms1                                                ;  // source register for DLD row indices
+    lsu_ctrl_dispatched_instr.nnz_to_load = dispatcher_reg_ms3                                                ;  // SPLD nnz_to_load from instr[17:15]
 
     // FIX THIS : extract from CSR
     lsu_ctrl_csr_config.n_col_bytes = quadrilatero_pkg::RLEN / 8       ;  // all bytes
@@ -959,6 +960,7 @@ module quadrilatero
       .address_i            (lsu_ctrl_issued_instr.addr             ),  // address value
       .operand_reg_i        (lsu_ctrl_issued_instr.operand_reg      ),  // destination register
       .index_reg_i          (lsu_ctrl_issued_instr.index_reg        ),  // row-index source register (DLD)
+      .nnz_to_load_i        (lsu_ctrl_issued_instr.nnz_to_load      ),  // SPLD nnz_to_load
       .instr_id_i           (lsu_ctrl_issued_instr.id               ),  // id of the instruction
       .start_i              (lsu_start                       ),  // start loading
       .write_i              (lsu_ctrl_issued_instr.is_store         ),

@@ -28,7 +28,7 @@ All instructions share `7'b0101011` (CUSTOM 1) as the major opcode, and func3 is
 
 | mnemonic |31–27 |26–25 |24–18 |17–15 |14–12 |11–10 |9–7 |6–0 | 
 | ------- | ---- | ---- |----- | ---- | ---- | ---- | -- | -- |
-| spld.w | 00100	|00 | 0000000 | 000	|func3	|10	|md	|major opcode	|
+| spld.w | 00100	|00 | 0000000 | nnz to load	|func3	|10	|md	|major opcode	|
 | dld.w | 00010	|00 | 0000000 | sp matrix reg |func3	|10	|md	|major opcode	|
 
 ## Directory Structure
