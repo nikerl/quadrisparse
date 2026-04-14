@@ -31,7 +31,6 @@ def generate_spmm_test_data(*args):
          open(f"mat_sp_row_{size}_{sparsity}.hex", "w") as f_row:
 
         row_ptr = 0
-        f_row.write(f"{row_ptr:08x}\n")
         for i in range(size):
             nnz = 0
             for j in range(size):
@@ -41,14 +40,14 @@ def generate_spmm_test_data(*args):
                     sparse_matrix[i][j] = val
                     f_val.write(f"{val:08x}\n")
                     f_col.write(f"{j:08x}\n")
-                    row_ptr += 1
                 else:
                     sparse_matrix[i][j] = 0
-            f_row.write(f"{row_ptr:08x}\n")
-            
+            if nnz > 0:
+                f_row.write(f"{row_ptr:08x}\n")
+            row_ptr += 1
     
     result = np.dot(dense_matrix, sparse_matrix)
-    with open(f"mat_ref_{size}_{sparsity}.hex", "w") as f_result:
+    with open(f"mat_res_{size}_{sparsity}.hex", "w") as f_result:
         for i in range(size):
             for j in range(size):
                 f_result.write(f"{result[i][j]:08x}\n")
