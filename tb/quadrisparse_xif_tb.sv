@@ -7,7 +7,7 @@
 
 `timescale 1ns/1ps
 
-module quadrilatero_xif_tb;
+module quadrisparse_xif_tb;
 	`include "quadrisparse_utils.svh";
 	`include "quadrisparse_instructions.svh";
 

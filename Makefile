@@ -1,4 +1,4 @@
-# Basic standalone simulation flow for quadrilatero_xif_tb.
+# Basic standalone simulation flow for quadrisparse_xif_tb.
 # Requires: bender, verilator
 
 SHELL := /bin/bash
@@ -8,8 +8,8 @@ ifeq (,$(filter -j% --jobs=% --jobs% --jobserver%,$(MAKEFLAGS)))
 MAKEFLAGS += -j$(shell nproc)
 endif
 
-TOP      ?= quadrilatero_xif_tb
-TB_FILE  ?= tb/quadrilatero_xif_tb.sv
+TOP      ?= quadrisparse_xif_tb
+TB_FILE  ?= tb/quadrisparse_xif_tb.sv
 BUILD_DIR ?= build
 FLIST    ?= $(BUILD_DIR)/flist.f
 SIMV     ?= $(BUILD_DIR)/simv
