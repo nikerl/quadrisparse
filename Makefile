@@ -52,6 +52,7 @@ flist: $(FLIST)
 $(FLIST): | $(BUILD_DIR)
 	@tmp="$@.tmp"; \
 	$(BENDER) script flist-plus | grep -v 'pad_functional\.sv' > "$$tmp"; \
+	printf "%s\n" "+incdir+tb" >> "$$tmp"; \
 	printf "%s\n" "$(TB_FILE)" >> "$$tmp"; \
 	if [ -f "$@" ] && cmp -s "$$tmp" "$@"; then rm -f "$$tmp"; else mv -f "$$tmp" "$@"; fi
 
