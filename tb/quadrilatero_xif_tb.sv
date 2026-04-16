@@ -11,21 +11,28 @@ module quadrilatero_xif_tb;
 	import quadrilatero_pkg::*;
 	import xif_pkg::*;
 
-	localparam int CLK_PERIOD_NS = 10;
-	localparam int N_ROWS     = 8;  // rows of sparse A / rows of C
-	localparam int N_COL_PAN  = 2;  // col panels of B (B_cols / 4)
-	localparam int K_PANELS   = 1;  // non-zero panels per sparse row (NNZ_per_row / 4)
-	localparam int K          = 4;  // inner dimension (cols of sparse A = rows of B)
-	localparam int N_COLS     = N_COL_PAN * 4; // output columns
-	localparam int NNZ_PER_ROW = K_PANELS * 4; // non-zeros per sparse row
-	localparam logic [31:0] B_BASE        = 32'h0000_0100;
-	localparam logic [31:0] VAL_BASE      = 32'h0000_0300;
-	localparam logic [31:0] COL_BASE      = 32'h0000_0400;
-	localparam logic [31:0] C_LEFT_BASE   = 32'h0000_0800;
-	localparam logic [31:0] C_RIGHT_BASE  = 32'h0000_0C00;
-	localparam logic [31:0] ROW_STRIDE    = 32'd16;
-	localparam logic [31:0] B_STRIDE      = 32'(N_COLS * 4); // stride between rows of B (N_COLS elements × 4 bytes)
-	localparam int MAX_INSTRS = 4096;
+	localparam int CLK_PERIOD_NS 	= 10;
+	localparam int N_ROWS     		= 16;  // rows of sparse A / rows of C
+	localparam int N_COLS 	  		= 16;  // cols of dense B / cols of C
+	localparam int ROW_STRIDE 		= N_COLS * 4;
+	localparam logic [31:0] VAL_BASE      	= 32'h0001_0000;
+	localparam logic [31:0] COL_BASE      	= 32'h0002_0000;
+	localparam logic [31:0] B_BASE        	= 32'h0003_0000;
+	localparam logic [31:0] C_BASE		  	= 32'h0004_0000;
+	localparam logic [31:0] REF_BASE      	= 32'h0005_0000;
+	localparam logic [31:0] MEM_MODEL_DEPTH = 32'h0001_0000;
+	localparam int MAX_INSTRS 	= 4096;
+
+	// Temporary storage for loading data files before packing into mem_model
+	logic [31:0] tempmem [0:4096]; // Change size if needed
+	int idx;
+	int mem_fd;
+	int scan_rc;
+	logic [31:0] scan_word;
+	int unsigned word_count;
+	int unsigned b_rows;
+
+	logic [31:0] row_ptrs [0:N_ROWS]; // row pointers for the sparse matrix, loaded from file
 
 	logic clk_i;
 	logic rst_ni;
@@ -64,22 +71,13 @@ module quadrilatero_xif_tb;
 	logic				x_result_ready;
 	x_result_t			x_result;
 
-	logic [127:0]		mem_model [0:511];
+	logic [127:0]		mem_model [0:MEM_MODEL_DEPTH-1];
 	logic				read_pending_q;
 	logic [31:0]		read_addr_q;
 
-	logic [31:0] tempmem [0:4096]; // Change size if needed
-	int idx;
-	int mem_fd;
-	int scan_rc;
-	logic [31:0] scan_word;
-	int unsigned word_count;
-	int unsigned b_rows;
-
 	int unsigned completed_results;
-	integer r, rp, cp, k, issued_cnt;
+	int issued_cnt;
 	logic [3:0] next_id;
-	logic [31:0] C_col_base [2];
 
 	longint unsigned cycle_count = 0;
 
@@ -241,6 +239,10 @@ module quadrilatero_xif_tb;
 	  return {e3, e2, e1, e0};
 	endfunction
 
+	function automatic int unsigned mem_row_idx(input logic [31:0] addr);
+		return addr >> 4;
+	endfunction
+
 	function automatic void load_data_into_mem(input logic [31:0] addr, input string filename);
 		// Load 32-bit words and pack them into 128-bit memory rows at addr.
 		word_count = 0;
@@ -265,12 +267,12 @@ module quadrilatero_xif_tb;
 			$fatal(1, "[TB] data file %s is empty", filename);
 		end
 
-		b_rows = word_count / 4;
-		if (((addr >> 4) + b_rows) > 256) begin
-			$fatal(1, "[TB] preload out of bounds for %s: addr=0x%08x rows=%0d", filename, addr, b_rows);
+		b_rows = (word_count + 3) / 4;
+		if ((mem_row_idx(addr) + b_rows) > MEM_MODEL_DEPTH) begin
+			$fatal(1, "[TB] preload out of bounds for %s: addr=0x%08x rows=%0d depth=%0d", filename, addr, b_rows, MEM_MODEL_DEPTH);
 		end
 
-		for (idx = 0; idx < b_rows; idx++) begin
+		for (idx = 0; idx < (word_count / 4); idx++) begin
 			mem_model[(addr >> 4) + idx] = pack_row_lsb_first(
 				tempmem[idx*4],
 				tempmem[idx*4 + 1],
@@ -280,17 +282,56 @@ module quadrilatero_xif_tb;
 		end
 		
 		if (word_count % 4) begin
-			mem_model[(addr >> 4) + b_rows] = pack_row_lsb_first(
-				(word_count > b_rows*4) ? tempmem[b_rows*4] : 32'd0,
-				(word_count > b_rows*4 + 1) ? tempmem[b_rows*4 + 1] : 32'd0,
-				(word_count > b_rows*4 + 2) ? tempmem[b_rows*4 + 2] : 32'd0,
-				(word_count > b_rows*4 + 3) ? tempmem[b_rows*4 + 3] : 32'd0
+			mem_model[(addr >> 4) + (word_count / 4)] = pack_row_lsb_first(
+				(word_count > (word_count / 4)*4) ? tempmem[(word_count / 4)*4] : 32'd0,
+				(word_count > (word_count / 4)*4 + 1) ? tempmem[(word_count / 4)*4 + 1] : 32'd0,
+				(word_count > (word_count / 4)*4 + 2) ? tempmem[(word_count / 4)*4 + 2] : 32'd0,
+				(word_count > (word_count / 4)*4 + 3) ? tempmem[(word_count / 4)*4 + 3] : 32'd0
 			);
 		end
 
 		$display("[TB] Loaded %s at 0x%08x: %0d words (%0d rows)", filename, addr, word_count, b_rows);
 	endfunction	
-	
+
+	function automatic void load_row_ptr(input string filename);
+		// Load 32-bit words into a local array
+		word_count = 0;
+		mem_fd = $fopen(filename, "r");
+		if (mem_fd == 0) begin
+			$fatal(1, "[TB] Failed to open data file: %s", filename);
+		end
+
+		while (!$feof(mem_fd) && (word_count < $size(tempmem))) begin
+			// Take in 32 bit hex words, use %d for decimal
+			scan_rc = $fscanf(mem_fd, "%h\n", scan_word);
+			if (scan_rc == 1) begin
+				row_ptrs[word_count] = scan_word;
+				word_count++;
+			end else begin
+				void'($fgetc(mem_fd));
+			end
+		end
+		$fclose(mem_fd);
+
+		if (word_count == 0) begin
+			$fatal(1, "[TB] data file %s is empty", filename);
+		end
+
+	endfunction	
+
+	function automatic void print_matrix(input logic [31:0] base_addr, input int rows, input int cols);
+		logic signed [31:0] got_val;
+		int elem_idx;
+		$display("[TB] C at 0x%08x (%0d x %0d):", base_addr, rows, cols);
+		for (int i = 0; i < rows; i++) begin
+			for (int j = 0; j < cols; j++) begin
+				elem_idx = i * cols + j;
+				got_val = $signed(mem_model[(base_addr + elem_idx * 4) >> 4][(((base_addr + elem_idx * 4) >> 2) & 2'b11) * 32 +: 32]);
+				$write(" %6d", got_val);
+			end
+			$display("");
+		end
+	endfunction
 
 	// Clock generation and cycle counting
 	initial begin
@@ -315,6 +356,9 @@ module quadrilatero_xif_tb;
 			mem_rvalid <= 1'b0;
 
 			if (read_pending_q) begin
+				if (mem_row_idx(read_addr_q) >= MEM_MODEL_DEPTH) begin
+					$fatal(1, "[TB] READ OOB: addr=0x%08x row=%0d depth=%0d", read_addr_q, mem_row_idx(read_addr_q), MEM_MODEL_DEPTH);
+				end
 				mem_rvalid <= 1'b1;
 				mem_rdata  <= mem_model[read_addr_q[31:4]];
 			end
@@ -326,6 +370,9 @@ module quadrilatero_xif_tb;
 			end
 
 			if (mem_req && mem_gnt && mem_we) begin
+				if (mem_row_idx(mem_addr) >= MEM_MODEL_DEPTH) begin
+					$fatal(1, "[TB] WRITE OOB: addr=0x%08x row=%0d depth=%0d", mem_addr, mem_row_idx(mem_addr), MEM_MODEL_DEPTH);
+				end
 				for (int b = 0; b < BUS_WIDTH/8; b++) begin
 					if (mem_be[b]) begin
 						mem_model[mem_addr[31:4]][8*b +: 8] <= mem_wdata[8*b +: 8];
@@ -419,13 +466,12 @@ module quadrilatero_xif_tb;
 
 	initial begin
 		// ── local working variables ──────────────────────────────────
-		logic signed [31:0] ref_A    [0:N_ROWS-1][0:K-1];          // dense rep of sparse A
-		logic signed [31:0] ref_B    [0:K-1][0:N_COLS-1];          // dense B
-		logic signed [31:0] ref_C    [0:N_ROWS-1][0:N_COLS-1];     // reference C = A*B
-		logic signed [31:0] dut_C    [0:N_ROWS-1][0:N_COLS-1];     // C read back from mem
-		logic [31:0]         val_data [0:N_ROWS-1][0:NNZ_PER_ROW-1]; // sparse A values
-		logic [31:0]         col_data [0:N_ROWS-1][0:NNZ_PER_ROW-1]; // sparse A col indices
-		int errors, mem_idx;
+		logic signed [31:0] got_val, exp_val;
+		int errors;
+		int val_ptr;
+		int nnz_to_load;
+		int elem_idx;
+		int chunk_limit;
 
 		// ── defaults ─────────────────────────────────────────────────
 		rst_ni              = 1'b0;
@@ -441,93 +487,24 @@ module quadrilatero_xif_tb;
 		x_mem_result        = '0;
 		x_result_ready      = 1'b1;
 
-		for (int i = 0; i < 512; i++) mem_model[i] = '0;
+		for (int i = 0; i < $size(mem_model); i++) mem_model[i] = '0;
 		for (int i = 0; i < 16;  i++) id_to_log_idx[i] = 0;
 
 		//===========================================================================
-		// Build reference matrices (pad = 0)
+		// Load matricies from data files
 		//===========================================================================
-		// Sparse tile: 4 non-zero values and their column indices (one SPLD fetch each)
-		/* load_data_into_mem(VAL_BASE, "mat_sp_val_8_0.5.hex");
-		load_data_into_mem(COL_BASE, "mat_sp_col_8_0.5.hex");
-		load_data_into_mem(ROW_BASE, "mat_sp_row_8_0.5.hex");
-		// Dense matrix B, row-major.
-		load_data_into_mem(B_BASE, "mat_d_8.hex"); */
 
 		// Sparse A column indices: with K=NNZ_PER_ROW every row is dense (cols 0..K-1)
-		for (int i = 0; i < N_ROWS; i++)
-			for (int kk = 0; kk < NNZ_PER_ROW; kk++)
-				col_data[i][kk] = kk;
+		load_data_into_mem(VAL_BASE, "mat_sp_val_16_0.8.hex");
+		load_data_into_mem(COL_BASE, "mat_sp_col_16_0.8.hex");
+		load_row_ptr("mat_sp_row_16_0.8.hex");
+		
+		// Dense matrix B, row-major.
+		load_data_into_mem(B_BASE, "mat_d_16_0.8.hex");
 
-		// Sparse A values: randomly sparse (~70% zeros), non-zeros use formula
-		for (int i = 0; i < N_ROWS; i++)
-			for (int kk = 0; kk < NNZ_PER_ROW; kk++)
-				val_data[i][kk] = ($urandom_range(0,9) < 7) ? 0 : (i + col_data[i][kk] + 1);
+		// result matrix for reference
+		load_data_into_mem(REF_BASE, "mat_ref_16_0.8.hex");
 
-		// Dense ref_A from CSR (for reference computation)
-		for (int i = 0; i < N_ROWS; i++) begin
-			for (int j = 0; j < K; j++) ref_A[i][j] = '0;
-			for (int kk = 0; kk < NNZ_PER_ROW; kk++)
-				ref_A[i][col_data[i][kk]] = val_data[i][kk];
-		end
-
-		// Dense B: same formula as original (B^T[j][k] = j-k+5  =>  B[k][j] = j-k+5)
-		for (int k2 = 0; k2 < K; k2++)
-			for (int j = 0; j < N_COLS; j++)
-				ref_B[k2][j] = 32'(j - k2 + 5);
-
-		// ref_C = ref_A * ref_B
-		for (int i = 0; i < N_ROWS; i++)
-			for (int j = 0; j < N_COLS; j++) begin
-				ref_C[i][j] = 0;
-				for (int k2 = 0; k2 < K; k2++)
-					ref_C[i][j] += ref_A[i][k2] * ref_B[k2][j];
-			end
-
-		$display("=== SPARSE A MATRIX ===");
-		for (int i = 0; i < N_ROWS; i++) begin
-			for (int j = 0; j < K; j++)
-				$write("%6d ", ref_A[i][j]);
-			$write("\n");
-		end
-		$display("=======================");
-
-		$display("=== B MATRIX (stored as B^T: %0d x %0d) ===", N_COLS, K);
-		for (int j = 0; j < N_COLS; j++) begin
-			for (int k2 = 0; k2 < K; k2++)
-				$write("%6d ", ref_B[k2][j]);  // B^T[j][k2] = B[k2][j]
-			$write("\n");
-		end
-		$display("================");
-
-		//===========================================================================
-		// Write reference matrices into mem_model
-		//===========================================================================
-
-		// B at B_BASE: K rows × N_COLS cols (4×8), 2 mem-lines per row (cols 0-3, cols 4-7)
-		for (int k2 = 0; k2 < K; k2++) begin
-			mem_model[(B_BASE >> 4) + k2*2 + 0] = pack_row_lsb_first(
-				32'(ref_B[k2][0]), 32'(ref_B[k2][1]),
-				32'(ref_B[k2][2]), 32'(ref_B[k2][3]));
-			mem_model[(B_BASE >> 4) + k2*2 + 1] = pack_row_lsb_first(
-				32'(ref_B[k2][4]), 32'(ref_B[k2][5]),
-				32'(ref_B[k2][6]), 32'(ref_B[k2][7]));
-		end
-
-		// Sparse A values and column indices at VAL_BASE / COL_BASE
-		for (int i = 0; i < N_ROWS; i++) begin
-			mem_model[(VAL_BASE >> 4) + i] = pack_row_lsb_first(
-				val_data[i][0], val_data[i][1], val_data[i][2], val_data[i][3]);
-			mem_model[(COL_BASE >> 4) + i] = pack_row_lsb_first(
-				col_data[i][0], col_data[i][1], col_data[i][2], col_data[i][3]);
-		end
-
-		$display("[TB] A (%0d x %0d sparse, %0d NNZ/row) at VAL=0x%08x COL=0x%08x",
-			N_ROWS, K, NNZ_PER_ROW, VAL_BASE, COL_BASE);
-		$display("[TB] B (%0d x %0d dense) at 0x%08x  stride=%0d bytes",
-			K, N_COLS, B_BASE, B_STRIDE);
-		$display("[TB] C (%0d x %0d) at LEFT=0x%08x RIGHT=0x%08x  row_stride=%0d bytes",
-			N_ROWS, N_COLS, C_LEFT_BASE, C_RIGHT_BASE, ROW_STRIDE);
 
 		//===========================================================================
 		// Reset
@@ -543,52 +520,46 @@ module quadrilatero_xif_tb;
 
 		issued_cnt    = 0;
 		next_id       = 4'd0;
-		C_col_base[0] = C_LEFT_BASE;
-		C_col_base[1] = C_RIGHT_BASE;
+		val_ptr       = 0;
 
-		for (rp = 0; rp < N_ROWS; rp += 2) begin
+		// For each row with in the row_ptr array
+		for (int row_idx = 0; row_idx < $size(row_ptrs) - 1; row_idx++) begin
+			// For each tile on this row in the dense matrix 
+			for (int col_tiles = 0; col_tiles < N_COLS / 4; col_tiles++) begin
+				// Reset the accumulator register for this output tile.
+				issue_and_commit(enc_mzero(3'(4 + col_tiles)), 32'd0, 32'd0, next_id); next_id++; issued_cnt++;
 
-			for (int acc = 0; acc < 2*N_COL_PAN; acc++) begin
-				issue_and_commit(enc_mzero(3'(4 + acc)), 32'd0, 32'd0, next_id); next_id++; issued_cnt++;
-			end
+				// Rewind sparse pointer to the start of this row for each output tile.
+				val_ptr = row_ptrs[row_idx];
 
-			for (k = 0; k < K_PANELS; k++) begin
-				issue_and_commit(enc_spld_w(3'd0, 3'd4),
-					VAL_BASE + 32'((rp     * K_PANELS + k) * 16),
-					COL_BASE + 32'((rp     * K_PANELS + k) * 16),
-					next_id); next_id++; issued_cnt++;
-				wait (completed_results >= issued_cnt);
-				repeat (2) @(posedge clk_i);
-
-				issue_and_commit(enc_spld_w(3'd2, 3'd4),
-					VAL_BASE + 32'(((rp+1) * K_PANELS + k) * 16),
-					COL_BASE + 32'(((rp+1) * K_PANELS + k) * 16),
-					next_id); next_id++; issued_cnt++;
-				wait (completed_results >= issued_cnt);
-				repeat (2) @(posedge clk_i);
-
-				for (cp = 0; cp < N_COL_PAN; cp++) begin
-					issue_and_commit(enc_dld_w(3'd1, 3'd0), B_BASE + 32'(cp * 16), B_STRIDE, next_id); next_id++; issued_cnt++;
+				// for each non zero in that row 
+				while (val_ptr < row_ptrs[row_idx+1]) begin
+					nnz_to_load = row_ptrs[row_idx+1] - val_ptr;
+					
+					chunk_limit = 4 - (val_ptr & 2'b11);
+					if (nnz_to_load > chunk_limit) nnz_to_load = chunk_limit;
+					if (nnz_to_load > 4) nnz_to_load = 4;
+					issue_and_commit(enc_spld_w(3'd0, 3'(nnz_to_load)), VAL_BASE + val_ptr * 4, COL_BASE + val_ptr * 4, next_id); next_id++; issued_cnt++;
+					val_ptr = val_ptr + nnz_to_load;
 					wait (completed_results >= issued_cnt); repeat (2) @(posedge clk_i);
 
-					issue_and_commit(enc_spmac_w(3'd0, 3'd1, 3'(4 + cp)), 32'd0, 32'd0, next_id); next_id++; issued_cnt++;
+					// load dense tile
+					issue_and_commit(enc_dld_w(3'd1, 3'd0), B_BASE + 32'(col_tiles * 16), ROW_STRIDE, next_id); next_id++; issued_cnt++;
+					//wait (completed_results >= issued_cnt); repeat (2) @(posedge clk_i);
 
-					issue_and_commit(enc_dld_w(3'd3, 3'd2), B_BASE + 32'(cp * 16), B_STRIDE, next_id); next_id++; issued_cnt++;
+					// do multiplication
+					issue_and_commit(enc_spmac_w(3'd0, 3'd1, 3'(4 + col_tiles)), 32'd0, 32'd0, next_id); next_id++; issued_cnt++;
 					wait (completed_results >= issued_cnt); repeat (2) @(posedge clk_i);
-
-					issue_and_commit(enc_spmac_w(3'd2, 3'd3, 3'(4 + N_COL_PAN + cp)), 32'd0, 32'd0, next_id); next_id++; issued_cnt++;
-					wait (completed_results >= issued_cnt); repeat (2) @(posedge clk_i);
+				
 				end
-			end
+				// write back the result
+				issue_and_commit(enc_mst_w(3'(4 + col_tiles)), C_BASE + 32'(row_idx * (N_COLS * 4) + col_tiles * 16), ROW_STRIDE, next_id);
+				next_id++; issued_cnt++;
+				//wait (completed_results >= issued_cnt); repeat (2) @(posedge clk_i);
 
-			for (cp = 0; cp < N_COL_PAN; cp++) begin
-				issue_and_commit(enc_mst_w(3'(4 + cp)),             C_col_base[cp] + 32'(rp       * 16), ROW_STRIDE, next_id); next_id++; issued_cnt++;
-				wait (completed_results >= issued_cnt); repeat (2) @(posedge clk_i);
-				issue_and_commit(enc_mst_w(3'(4 + N_COL_PAN + cp)), C_col_base[cp] + 32'((rp + 1) * 16), ROW_STRIDE, next_id); next_id++; issued_cnt++;
-				wait (completed_results >= issued_cnt); repeat (2) @(posedge clk_i);
 			end
-
 		end
+
 
 		repeat (10) @(posedge clk_i);
 
@@ -605,49 +576,40 @@ module quadrilatero_xif_tb;
 		end
 
 		//===========================================================================
-		// Read back dut_C and verify against ref_C
+		// Compare result matrix at C_BASE against reference matrix at REF_BASE
 		//===========================================================================
 
-		for (int i = 0; i < N_ROWS; i++) begin
-			mem_idx = (C_LEFT_BASE >> 4) + i;
-			dut_C[i][0] = $signed(mem_model[mem_idx][ 31: 0]);
-			dut_C[i][1] = $signed(mem_model[mem_idx][ 63:32]);
-			dut_C[i][2] = $signed(mem_model[mem_idx][ 95:64]);
-			dut_C[i][3] = $signed(mem_model[mem_idx][127:96]);
-			mem_idx = (C_RIGHT_BASE >> 4) + i;
-			dut_C[i][4] = $signed(mem_model[mem_idx][ 31: 0]);
-			dut_C[i][5] = $signed(mem_model[mem_idx][ 63:32]);
-			dut_C[i][6] = $signed(mem_model[mem_idx][ 95:64]);
-			dut_C[i][7] = $signed(mem_model[mem_idx][127:96]);
-		end
-
-		$display("\n[TB] C (%0d x %0d)  DUT | REF", N_ROWS, N_COLS);
-		for (int i = 0; i < N_ROWS; i++) begin
-			for (int j = 0; j < N_COLS; j++) $write(" %6d", $signed(dut_C[i][j]));
-			$write("  |");
-			for (int j = 0; j < N_COLS; j++) $write(" %6d", $signed(ref_C[i][j]));
-			$display("");
-		end
-
 		errors = 0;
-		for (int i = 0; i < N_ROWS; i++)
-			for (int j = 0; j < N_COLS; j++)
-				if (dut_C[i][j] !== ref_C[i][j]) begin
-					$display("[ERROR] C[%0d][%0d]: DUT=%0d  REF=%0d",
-						i, j, $signed(dut_C[i][j]), $signed(ref_C[i][j]));
+		for (int i = 0; i < N_ROWS; i++) begin
+			for (int j = 0; j < N_COLS; j++) begin
+				elem_idx = i * N_COLS + j;
+				got_val = $signed(mem_model[(C_BASE + elem_idx * 4) >> 4][(((C_BASE + elem_idx * 4) >> 2) & 2'b11) * 32 +: 32]);
+				exp_val = $signed(mem_model[(REF_BASE + elem_idx * 4) >> 4][(((REF_BASE + elem_idx * 4) >> 2) & 2'b11) * 32 +: 32]);
+				if ($isunknown(got_val) || $isunknown(exp_val)) begin
+					$display("[ERROR] Unknown data at C[%0d][%0d] @0x%08x: GOT=%0h  REF=%0h",
+						i, j, (C_BASE + elem_idx * 4), got_val, exp_val);
+					errors++;
+				end else if (got_val !== exp_val) begin
+					$display("[ERROR] C[%0d][%0d] @0x%08x: GOT=%0d  REF=%0d",
+						i, j, (C_BASE + elem_idx * 4), got_val, exp_val);
 					errors++;
 				end
+			end
+		end
 
-		if (errors == 0)
-			$display("\n[TB] PASS -- all %0d elements correct.", N_ROWS*N_COLS);
-		else
+		if (errors == 0) begin
+			$display("\n[TB] PASS -- all %0d elements matched REF_BASE.", N_ROWS * N_COLS);
+		end else begin
 			$display("\n[TB] FAIL -- %0d mismatches.", errors);
+		end
+
+		print_matrix(C_BASE, N_ROWS, N_COLS);
 
 		$finish;
 	end
 
 	initial begin
-		#50000ns;
+		#5000000000ns;
 		$fatal(1, "[TB] Timeout waiting for matrix multiplication flow.");
 	end
 
