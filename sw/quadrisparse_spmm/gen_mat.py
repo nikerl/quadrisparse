@@ -47,7 +47,7 @@ def generate_spmm_test_data(*args):
             f_row.write(f"{row_ptr:08x}\n")
             
     
-    result = np.dot(dense_matrix, sparse_matrix)
+    result = np.dot(sparse_matrix, dense_matrix)
     with open(f"mat_ref_{size}_{sparsity}.hex", "w") as f_result:
         for i in range(size):
             for j in range(size):
