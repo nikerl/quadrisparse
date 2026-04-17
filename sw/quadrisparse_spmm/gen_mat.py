@@ -17,7 +17,7 @@ def generate_spmm_test_data(*args):
     sparse_matrix = np.zeros((size, size), dtype=np.int32)
     
     # Dense matrix
-    with open(f"mat_d_{size}_{sparsity}.hex", "w") as f_dense:
+    with open(f"mat_{size}_{sparsity}_b.hex", "w") as f_dense:
         for i in range(size):
             for j in range(size):
                 val = random.randint(0, MAX_VAL)
@@ -26,9 +26,9 @@ def generate_spmm_test_data(*args):
                 
             
     # Sparse matrix in CSR format
-    with open(f"mat_sp_val_{size}_{sparsity}.hex", "w") as f_val, \
-         open(f"mat_sp_col_{size}_{sparsity}.hex", "w") as f_col, \
-         open(f"mat_sp_row_{size}_{sparsity}.hex", "w") as f_row:
+    with open(f"mat_{size}_{sparsity}_a_val.hex", "w") as f_val, \
+         open(f"mat_{size}_{sparsity}_a_col.hex", "w") as f_col, \
+         open(f"mat_{size}_{sparsity}_a_row.hex", "w") as f_row:
 
         row_ptr = 0
         f_row.write(f"{row_ptr:08x}\n")
@@ -48,7 +48,7 @@ def generate_spmm_test_data(*args):
             
     
     result = np.dot(sparse_matrix, dense_matrix)
-    with open(f"mat_ref_{size}_{sparsity}.hex", "w") as f_result:
+    with open(f"mat_{size}_{sparsity}_ref.hex", "w") as f_result:
         for i in range(size):
             for j in range(size):
                 f_result.write(f"{result[i][j]:08x}\n")

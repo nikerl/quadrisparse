@@ -19,6 +19,17 @@ VERILATOR_SIMV ?= $(OBJ_DIR)/$(notdir $(SIMV))
 VERILATOR ?= verilator
 VERILATOR_FLAGS ?= --binary --timing -Wall -Wno-fatal
 
+# Optional runtime plusargs passed to the Verilator testbench binary.
+DATA_PREFIX ?=
+DIM ?=
+RUN_PLUSARGS :=
+ifneq ($(strip $(DATA_PREFIX)),)
+	RUN_PLUSARGS += +data_file_prefix=$(DATA_PREFIX)
+endif
+ifneq ($(strip $(DIM)),)
+	RUN_PLUSARGS += +dim=$(DIM)
+endif
+
 # Optional fallback flow (kept for convenience)
 IVERILOG ?= iverilog
 VVP      ?= vvp
@@ -64,7 +75,7 @@ $(VERILATOR_SIMV): $(FLIST) $(RTL_SRCS) Bender.yml
 	$(VERILATOR) $(VERILATOR_FLAGS) --top-module $(TOP) -f $(FLIST) --Mdir $(OBJ_DIR) -o $(notdir $(SIMV))
 
 run: $(VERILATOR_SIMV)
-	$(VERILATOR_SIMV)
+	$(VERILATOR_SIMV) $(RUN_PLUSARGS)
 
 compile-iverilog: flist
 	$(IVERILOG) -g2012 -s $(TOP) -o $(SIMV) -f $(FLIST)
