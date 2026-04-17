@@ -18,7 +18,7 @@ module quadrisparse_xif_tb;
 
 	string data_file_prefix;
 	int dim;
-	
+
 	int N_ROWS;
 	int N_COLS;
 	int ROW_STRIDE;
@@ -240,6 +240,7 @@ module quadrisparse_xif_tb;
 		int nnz_to_load;
 		int elem_idx;
 		int chunk_limit;
+		logic [2:0] acc_reg;
 
 		// ── defaults ─────────────────────────────────────────────────
 		rst_ni              = 1'b0;
@@ -254,6 +255,7 @@ module quadrisparse_xif_tb;
 		x_mem_result_valid  = 1'b0;
 		x_mem_result        = '0;
 		x_result_ready      = 1'b1;
+		acc_reg             = 3'd4;
 
 		if (!$value$plusargs("data_file_prefix=%s", data_file_prefix)) begin
 			$fatal(1, "data file prefix argument not provided");
@@ -305,7 +307,7 @@ module quadrisparse_xif_tb;
 		//===========================================================================
 
 		issued_cnt    = 0;
-		next_id       = 4'd0;
+		next_id       = 32'd0;
 		val_ptr       = 0;
 
 		// For each row with in the row_ptr array
@@ -313,7 +315,7 @@ module quadrisparse_xif_tb;
 			// For each tile on this row in the dense matrix 
 			for (int col_tiles = 0; col_tiles < N_COLS / 4; col_tiles++) begin
 				// Reset the accumulator register for this output tile.
-				issue_and_commit(enc_mzero(3'(4 + col_tiles)), 32'd0, 32'd0, next_id); next_id++; issued_cnt++;
+				issue_and_commit(enc_mzero(acc_reg), 32'd0, 32'd0, next_id); next_id++; issued_cnt++;
 
 				// Rewind sparse pointer to the start of this row for each output tile.
 				val_ptr = row_ptrs[row_idx];
@@ -334,12 +336,12 @@ module quadrisparse_xif_tb;
 					//wait (completed_results >= issued_cnt); repeat (2) @(posedge clk_i);
 
 					// do multiplication
-					issue_and_commit(enc_spmac_w(3'd0, 3'd1, 3'(4 + col_tiles)), 32'd0, 32'd0, next_id); next_id++; issued_cnt++;
+					issue_and_commit(enc_spmac_w(3'd0, 3'd1, acc_reg), 32'd0, 32'd0, next_id); next_id++; issued_cnt++;
 					wait (completed_results >= issued_cnt); repeat (2) @(posedge clk_i);
 				
 				end
 				// write back the result
-				issue_and_commit(enc_mst_w(3'(4 + col_tiles)), C_BASE + 32'(row_idx * (N_COLS * 4) + col_tiles * 16), ROW_STRIDE, next_id);
+				issue_and_commit(enc_mst_w(acc_reg), C_BASE + 32'(row_idx * (N_COLS * 4) + col_tiles * 16), ROW_STRIDE, next_id);
 				next_id++; issued_cnt++;
 				//wait (completed_results >= issued_cnt); repeat (2) @(posedge clk_i);
 
@@ -395,7 +397,7 @@ module quadrisparse_xif_tb;
 	end
 
 	initial begin
-		#5000000000ns;
+		#50000000ns;
 		$fatal(1, "[TB] Timeout waiting for matrix multiplication flow.");
 	end
 
