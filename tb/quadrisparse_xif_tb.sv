@@ -15,10 +15,13 @@ module quadrisparse_xif_tb;
 	import xif_pkg::*;
 
 	localparam int CLK_PERIOD_NS 	= 10;
-	localparam int N_ROWS     		= 16;  // rows of sparse A / rows of C
-	localparam int N_COLS 	  		= 16;  // cols of dense B / cols of C
-	localparam int ROW_STRIDE 		= N_COLS * 4;
+
+	string data_file_prefix;
+	int dim;
 	
+	int N_ROWS;
+	int N_COLS;
+	int ROW_STRIDE;
 	localparam logic [31:0] VAL_BASE      	= 32'h0001_0000;
 	localparam logic [31:0] COL_BASE      	= 32'h0002_0000;
 	localparam logic [31:0] B_BASE        	= 32'h0003_0000;
@@ -37,7 +40,7 @@ module quadrisparse_xif_tb;
 	int unsigned word_count;
 	int unsigned b_rows;
 
-	logic [31:0] row_ptrs [0:N_ROWS]; // row pointers for the sparse matrix, loaded from file
+	logic [31:0] row_ptrs []; // row pointers for the sparse matrix, loaded from file
 
 	logic clk_i;
 	logic rst_ni;
@@ -252,6 +255,24 @@ module quadrisparse_xif_tb;
 		x_mem_result        = '0;
 		x_result_ready      = 1'b1;
 
+		if (!$value$plusargs("data_file_prefix=%s", data_file_prefix)) begin
+			$fatal(1, "data file prefix argument not provided");
+		end
+		if (!$value$plusargs("dim=%0d", dim)) begin
+			$fatal(1, "dimension argument not provided");
+		end
+		if (dim <= 0) begin
+			$fatal(1, "dimension must be positive, got %0d", dim);
+		end
+		if ((dim % 4) != 0) begin
+			$fatal(1, "dimension must be divisible by 4, got %0d", dim);
+		end
+
+		N_ROWS = dim;
+		N_COLS = dim;
+		ROW_STRIDE = N_COLS * 4;
+		row_ptrs = new[N_ROWS + 1];
+
 		for (int i = 0; i < $size(mem_model); i++) mem_model[i] = '0;
 		for (int i = 0; i < 16;  i++) id_to_log_idx[i] = 0;
 
@@ -260,15 +281,15 @@ module quadrisparse_xif_tb;
 		//===========================================================================
 
 		// Sparse A column indices: with K=NNZ_PER_ROW every row is dense (cols 0..K-1)
-		load_data_into_mem(VAL_BASE, "mat_sp_val_16_0.8.hex");
-		load_data_into_mem(COL_BASE, "mat_sp_col_16_0.8.hex");
-		load_row_ptr("mat_sp_row_16_0.8.hex");
-		
+		load_data_into_mem(VAL_BASE, {data_file_prefix, "_a_val.hex"});
+		load_data_into_mem(COL_BASE, {data_file_prefix, "_a_col.hex"});
+		load_row_ptr({data_file_prefix, "_a_row.hex"});
+
 		// Dense matrix B, row-major.
-		load_data_into_mem(B_BASE, "mat_d_16_0.8.hex");
+		load_data_into_mem(B_BASE, {data_file_prefix, "_b.hex"});
 
 		// result matrix for reference
-		load_data_into_mem(REF_BASE, "mat_ref_16_0.8.hex");
+		load_data_into_mem(REF_BASE, {data_file_prefix, "_ref.hex"});
 
 
 		//===========================================================================
