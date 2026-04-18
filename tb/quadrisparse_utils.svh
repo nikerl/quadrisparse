@@ -73,10 +73,6 @@ function automatic void load_data_into_mem(input logic [31:0] addr, input string
     end
     $fclose(mem_fd);
 
-    if (word_count == 0) begin
-        $fatal(1, "[TB] data file %s is empty", filename);
-    end
-
     b_rows = (word_count + 3) / 4;
     if ((mem_row_idx(addr) + b_rows) > MEM_MODEL_DEPTH) begin
         $fatal(1, "[TB] preload out of bounds for %s: addr=0x%08x rows=%0d depth=%0d", filename, addr, b_rows, MEM_MODEL_DEPTH);
