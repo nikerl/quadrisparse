@@ -312,6 +312,11 @@ module quadrisparse_xif_tb;
 
 		// For each row with in the row_ptr array
 		for (int row_idx = 0; row_idx < $size(row_ptrs) - 1; row_idx++) begin
+			// Skip enptry rows
+			if (row_ptrs[row_idx] == row_ptrs[row_idx+1]) begin
+				continue;
+			end
+
 			// For each tile on this row in the dense matrix 
 			for (int col_tiles = 0; col_tiles < N_COLS / 4; col_tiles++) begin
 				// Reset the accumulator register for this output tile.
