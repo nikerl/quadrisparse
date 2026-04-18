@@ -240,7 +240,11 @@ module quadrisparse_xif_tb;
 		int nnz_to_load;
 		int elem_idx;
 		int chunk_limit;
-		logic [2:0] acc_reg;
+		int col_tile_start;
+		int tiles_in_group;
+		int tile_in_group;
+		int col_tile_idx;
+		logic [2:0] acc_regs [0:3];
 
 		// ── defaults ─────────────────────────────────────────────────
 		rst_ni              = 1'b0;
@@ -255,7 +259,10 @@ module quadrisparse_xif_tb;
 		x_mem_result_valid  = 1'b0;
 		x_mem_result        = '0;
 		x_result_ready      = 1'b1;
-		acc_reg             = 3'd4;
+		acc_regs[0]         = 3'd4;
+		acc_regs[1]         = 3'd5;
+		acc_regs[2]         = 3'd6;
+		acc_regs[3]         = 3'd7;
 
 		if (!$value$plusargs("data_file_prefix=%s", data_file_prefix)) begin
 			$fatal(1, "data file prefix argument not provided");
@@ -310,46 +317,51 @@ module quadrisparse_xif_tb;
 		next_id       = 32'd0;
 		val_ptr       = 0;
 
-		// For each row with in the row_ptr array
+		// Gustavson-style schedule (tile-stationary over a small tile group):
+		// row -> tile-group -> sparse chunks, reusing each sparse chunk across 4 output tiles.
 		for (int row_idx = 0; row_idx < $size(row_ptrs) - 1; row_idx++) begin
 			// Skip enptry rows
 			if (row_ptrs[row_idx] == row_ptrs[row_idx+1]) begin
 				continue;
 			end
 
-			// For each tile on this row in the dense matrix 
-			for (int col_tiles = 0; col_tiles < N_COLS / 4; col_tiles++) begin
-				// Reset the accumulator register for this output tile.
-				issue_and_commit(enc_mzero(acc_reg), 32'd0, 32'd0, next_id); next_id++; issued_cnt++;
+			for (col_tile_start = 0; col_tile_start < (N_COLS / 4); col_tile_start += 4) begin
+				tiles_in_group = (N_COLS / 4) - col_tile_start;
+				if (tiles_in_group > 4) tiles_in_group = 4;
 
-				// Rewind sparse pointer to the start of this row for each output tile.
+				// Zero all accumulator tiles in this group.
+				for (tile_in_group = 0; tile_in_group < tiles_in_group; tile_in_group++) begin
+					issue_and_commit(enc_mzero(acc_regs[tile_in_group]), 32'd0, 32'd0, next_id); next_id++; issued_cnt++;
+				end
+
+				// Walk the sparse row once per tile group and reuse each sparse chunk.
 				val_ptr = row_ptrs[row_idx];
-
-				// for each non zero in that row 
 				while (val_ptr < row_ptrs[row_idx+1]) begin
 					nnz_to_load = row_ptrs[row_idx+1] - val_ptr;
-					
+
 					chunk_limit = 4 - (val_ptr & 2'b11);
 					if (nnz_to_load > chunk_limit) nnz_to_load = chunk_limit;
 					if (nnz_to_load > 4) nnz_to_load = 4;
+
 					issue_and_commit(enc_spld_w(3'd0, 3'(nnz_to_load)), VAL_BASE + val_ptr * 4, COL_BASE + val_ptr * 4, next_id); next_id++; issued_cnt++;
 					val_ptr = val_ptr + nnz_to_load;
 					wait (completed_results >= issued_cnt); repeat (2) @(posedge clk_i);
 
-					// load dense tile
-					issue_and_commit(enc_dld_w(3'd1, 3'd0), B_BASE + 32'(col_tiles * 16), ROW_STRIDE, next_id); next_id++; issued_cnt++;
-					//wait (completed_results >= issued_cnt); repeat (2) @(posedge clk_i);
-
-					// do multiplication
-					issue_and_commit(enc_spmac_w(3'd0, 3'd1, acc_reg), 32'd0, 32'd0, next_id); next_id++; issued_cnt++;
-					wait (completed_results >= issued_cnt); repeat (2) @(posedge clk_i);
-				
+					for (tile_in_group = 0; tile_in_group < tiles_in_group; tile_in_group++) begin
+						col_tile_idx = col_tile_start + tile_in_group;
+						issue_and_commit(enc_dld_w(3'd1, 3'd0), B_BASE + 32'(col_tile_idx * 16), ROW_STRIDE, next_id); next_id++; issued_cnt++;
+						issue_and_commit(enc_spmac_w(3'd0, 3'd1, acc_regs[tile_in_group]), 32'd0, 32'd0, next_id); next_id++; issued_cnt++;
+						wait (completed_results >= issued_cnt); repeat (2) @(posedge clk_i);
+					end
 				end
-				// write back the result
-				issue_and_commit(enc_mst_w(acc_reg), C_BASE + 32'(row_idx * (N_COLS * 4) + col_tiles * 16), ROW_STRIDE, next_id);
-				next_id++; issued_cnt++;
-				//wait (completed_results >= issued_cnt); repeat (2) @(posedge clk_i);
 
+				// Store the completed output tile group.
+				for (tile_in_group = 0; tile_in_group < tiles_in_group; tile_in_group++) begin
+					col_tile_idx = col_tile_start + tile_in_group;
+					issue_and_commit(enc_mst_w(acc_regs[tile_in_group]), C_BASE + 32'(row_idx * (N_COLS * 4) + col_tile_idx * 16), ROW_STRIDE, next_id);
+					next_id++; issued_cnt++;
+				end
+				wait (completed_results >= issued_cnt); repeat (2) @(posedge clk_i);
 			end
 		end
 
