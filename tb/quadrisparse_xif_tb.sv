@@ -22,17 +22,24 @@ module quadrisparse_xif_tb;
 	int N_ROWS;
 	int N_COLS;
 	int ROW_STRIDE;
-	localparam logic [31:0] VAL_BASE      	= 32'h0001_0000;
-	localparam logic [31:0] COL_BASE      	= 32'h0002_0000;
-	localparam logic [31:0] B_BASE        	= 32'h0003_0000;
-	localparam logic [31:0] C_BASE		  	= 32'h0004_0000;
-	localparam logic [31:0] REF_BASE      	= 32'h0005_0000;
+	// 2MB slots per buffer avoid overlap for DIM=512 (1MB matrices) and sparse tail writes.
+	localparam logic [31:0] VAL_BASE      	= 32'h0000_0000;
+	localparam logic [31:0] COL_BASE      	= 32'h0020_0000;
+	localparam logic [31:0] A_BASE        	= 32'h0040_0000;
+	localparam logic [31:0] B_BASE        	= 32'h0060_0000;
+	localparam logic [31:0] C_BASE		  	= 32'h0080_0000;
+	localparam logic [31:0] REF_BASE      	= 32'h00A0_0000;
+	localparam logic [31:0] BT_BASE       	= 32'h00C0_0000;
 
-	localparam logic [31:0] MEM_MODEL_DEPTH = 32'h0001_0000;
-	localparam int MAX_INSTRS 	= 4096;
+	localparam logic [31:0] MEM_MODEL_DEPTH = 32'h0010_0000;
+	localparam int MAX_INSTRS 	= MEM_MODEL_DEPTH;
+
+	int M_PAD;
+	int N_PAD;
+	int K_PAD;
 
 	// Temporary storage for loading data files before packing into mem_model
-	logic [31:0] tempmem [0:4096]; // Change size if needed
+	logic [31:0] tempmem [0:MEM_MODEL_DEPTH-1]; // Change size if needed
 	int idx;
 	int mem_fd;
 	int scan_rc;
@@ -156,12 +163,13 @@ module quadrisparse_xif_tb;
 		end else if (x_result_valid && x_result_ready) begin
 			completed_results <= completed_results + 1;
 			instr_log[id_to_log_idx[x_result.id]].complete_cycle = cycle_count;
-			$display("[TB] COMPLETE %-10s id=%0d log=%0d (cycle %0d, latency=%0d)",
+			// Print completed instructions
+			/* $display("[TB] COMPLETE %-10s id=%0d log=%0d (cycle %0d, latency=%0d)",
 				instr_log[id_to_log_idx[x_result.id]].name,
 				x_result.id,
 				id_to_log_idx[x_result.id],
 				cycle_count,
-				cycle_count - instr_log[id_to_log_idx[x_result.id]].issue_cycle);
+				cycle_count - instr_log[id_to_log_idx[x_result.id]].issue_cycle); */
 		end
 	end
 
@@ -185,8 +193,9 @@ module quadrisparse_xif_tb;
 				default                         : instr_log[log_issue_ptr].name = "UNKNOWN";
 			endcase
 
-			$display("[TB] ISSUE    %-10s id=%0d log=%0d (cycle %0d)",
-				instr_log[log_issue_ptr].name, x_issue_req.id, log_issue_ptr, cycle_count);
+			// Print issued instructions
+			/* $display("[TB] ISSUE    %-10s id=%0d log=%0d (cycle %0d)",
+				instr_log[log_issue_ptr].name, x_issue_req.id, log_issue_ptr, cycle_count); */
 
 			log_issue_ptr = log_issue_ptr + 1;
 		end
@@ -237,14 +246,23 @@ module quadrisparse_xif_tb;
 		logic signed [31:0] got_val, exp_val;
 		int errors;
 		int val_ptr;
+		string flow_mode;
+		bit run_sparse;
+		bit run_dense;
 		int nnz_to_load;
 		int elem_idx;
 		int chunk_limit;
 		int col_tile_start;
 		int tiles_in_group;
-		int tile_in_group;
+		int tile;
 		int col_tile_idx;
 		logic [2:0] acc_regs [0:3];
+		logic [2:0] dense_regs [0:1];
+		logic [3:0] dld_ids [0:3];
+		logic [3:0] spmac_ids [0:3];
+
+		logic [31:0] a0, a4, b0, b4;                        // tile base addresses
+		logic [31:0] c00, c01, c10, c11;                    // C store addresses
 
 		// ── defaults ─────────────────────────────────────────────────
 		rst_ni              = 1'b0;
@@ -263,6 +281,8 @@ module quadrisparse_xif_tb;
 		acc_regs[1]         = 3'd5;
 		acc_regs[2]         = 3'd6;
 		acc_regs[3]         = 3'd7;
+		dense_regs[0]    = 3'd1;
+		dense_regs[1]    = 3'd2;
 
 		if (!$value$plusargs("data_file_prefix=%s", data_file_prefix)) begin
 			$fatal(1, "data file prefix argument not provided");
@@ -277,10 +297,23 @@ module quadrisparse_xif_tb;
 			$fatal(1, "dimension must be divisible by 4, got %0d", dim);
 		end
 
+		if (!$value$plusargs("flow=%s", flow_mode)) begin
+			flow_mode = "dense";
+		end
+		run_sparse = (flow_mode == "sparse") || (flow_mode == "both");
+		run_dense  = (flow_mode == "dense")  || (flow_mode == "both");
+		if (!run_sparse && !run_dense) begin
+			$fatal(1, "Unsupported flow='%s' (use dense|sparse|both)", flow_mode);
+		end
+
 		N_ROWS = dim;
 		N_COLS = dim;
 		ROW_STRIDE = N_COLS * 4;
 		row_ptrs = new[N_ROWS + 1];
+
+		M_PAD = ((dim + 7) / 8) * 8;
+		N_PAD = ((dim + 7) / 8) * 8;
+		K_PAD = ((dim + 3) / 4) * 4;
 
 		for (int i = 0; i < $size(mem_model); i++) mem_model[i] = '0;
 		for (int i = 0; i < 16;  i++) id_to_log_idx[i] = 0;
@@ -290,12 +323,25 @@ module quadrisparse_xif_tb;
 		//===========================================================================
 
 		// Sparse A column indices: with K=NNZ_PER_ROW every row is dense (cols 0..K-1)
+		load_data_into_mem(A_BASE, {data_file_prefix, "_a.hex"});
 		load_data_into_mem(VAL_BASE, {data_file_prefix, "_a_val.hex"});
 		load_data_into_mem(COL_BASE, {data_file_prefix, "_a_col.hex"});
 		load_row_ptr({data_file_prefix, "_a_row.hex"});
 
 		// Dense matrix B, row-major.
 		load_data_into_mem(B_BASE, {data_file_prefix, "_b.hex"});
+
+		// MMASA dense path expects B tiles in transposed layout at BT_BASE.
+		for (int i = 0; i < N_ROWS; i++) begin
+			for (int j = 0; j < N_COLS; j++) begin
+				logic [31:0] src_addr;
+				logic [31:0] dst_addr;
+				src_addr = B_BASE + ((i * N_COLS + j) * 4);
+				dst_addr = BT_BASE + ((j * N_ROWS + i) * 4);
+				mem_model[dst_addr >> 4][(((dst_addr >> 2) & 2'b11) * 32) +: 32] =
+					mem_model[src_addr >> 4][(((src_addr >> 2) & 2'b11) * 32) +: 32];
+			end
+		end
 
 		// result matrix for reference
 		load_data_into_mem(REF_BASE, {data_file_prefix, "_ref.hex"});
@@ -319,56 +365,134 @@ module quadrisparse_xif_tb;
 
 		// Gustavson-style schedule (tile-stationary over a small tile group):
 		// row -> tile-group -> sparse chunks, reusing each sparse chunk across 4 output tiles.
+		if (run_sparse) begin
 		for (int row_idx = 0; row_idx < $size(row_ptrs) - 1; row_idx++) begin
 			// Skip enptry rows
-			if (row_ptrs[row_idx] == row_ptrs[row_idx+1]) begin
+			if (row_ptrs[row_idx] == row_ptrs[row_idx + 1]) begin
 				continue;
 			end
 
-			for (col_tile_start = 0; col_tile_start < (N_COLS / 4); col_tile_start += 4) begin
-				tiles_in_group = (N_COLS / 4) - col_tile_start;
+			for (col_tile_start = 0; col_tile_start < N_COLS/4; col_tile_start += 4) begin
+				tiles_in_group = N_COLS/4 - col_tile_start;
 				if (tiles_in_group > 4) tiles_in_group = 4;
 
 				// Zero all accumulator tiles in this group.
-				for (tile_in_group = 0; tile_in_group < tiles_in_group; tile_in_group++) begin
-					issue_and_commit(enc_mzero(acc_regs[tile_in_group]), 32'd0, 32'd0, next_id); next_id++; issued_cnt++;
+				for (tile = 0; tile < tiles_in_group; tile++) begin
+					issue_and_commit(enc_mzero(acc_regs[tile]), 32'd0, 32'd0, next_id);
+					next_id++; issued_cnt++;
 				end
 
 				// Walk the sparse row once per tile group and reuse each sparse chunk.
-				val_ptr = row_ptrs[row_idx];
-				while (val_ptr < row_ptrs[row_idx+1]) begin
-					nnz_to_load = row_ptrs[row_idx+1] - val_ptr;
+				for (val_ptr = row_ptrs[row_idx]; val_ptr < row_ptrs[row_idx + 1];) begin
+					nnz_to_load = row_ptrs[row_idx + 1] - val_ptr;
 
 					chunk_limit = 4 - (val_ptr & 2'b11);
 					if (nnz_to_load > chunk_limit) nnz_to_load = chunk_limit;
 					if (nnz_to_load > 4) nnz_to_load = 4;
 
-					issue_and_commit(enc_spld_w(3'd0, 3'(nnz_to_load)), VAL_BASE + val_ptr * 4, COL_BASE + val_ptr * 4, next_id); next_id++; issued_cnt++;
+					issue_and_commit(enc_spld_w(3'd0, 3'(nnz_to_load)), VAL_BASE + val_ptr * 4, COL_BASE + val_ptr * 4, next_id); 
+					next_id++; issued_cnt++;
 					val_ptr = val_ptr + nnz_to_load;
-					wait (completed_results >= issued_cnt); repeat (2) @(posedge clk_i);
+					wait (completed_results >= issued_cnt); repeat (1) @(posedge clk_i);
 
-					for (tile_in_group = 0; tile_in_group < tiles_in_group; tile_in_group++) begin
-						col_tile_idx = col_tile_start + tile_in_group;
-						issue_and_commit(enc_dld_w(3'd1, 3'd0), B_BASE + 32'(col_tile_idx * 16), ROW_STRIDE, next_id); next_id++; issued_cnt++;
-						issue_and_commit(enc_spmac_w(3'd0, 3'd1, acc_regs[tile_in_group]), 32'd0, 32'd0, next_id); next_id++; issued_cnt++;
-						wait (completed_results >= issued_cnt); repeat (2) @(posedge clk_i);
+					for (tile = 0; tile <= tiles_in_group; tile++) begin
+						if (tile < tiles_in_group) begin
+							col_tile_idx = col_tile_start + tile;
+							dld_ids[tile] = next_id;
+							issue_and_commit(enc_dld_w(dense_regs[tile % 2], 3'd0), B_BASE + 32'(col_tile_idx * 16), ROW_STRIDE, next_id); 
+							next_id++; issued_cnt++;
+						end
+
+						if (tile > 0) begin
+							wait (instr_log[id_to_log_idx[dld_ids[tile-1]]].complete_cycle != '1);
+							spmac_ids[tile-1] = next_id;
+							issue_and_commit(enc_spmac_w(3'd0, dense_regs[(tile-1) % 2], acc_regs[tile-1]), 32'd0, 32'd0, next_id); 
+							next_id++; issued_cnt++;
+						end
 					end
 				end
 
 				// Store the completed output tile group.
-				for (tile_in_group = 0; tile_in_group < tiles_in_group; tile_in_group++) begin
-					col_tile_idx = col_tile_start + tile_in_group;
-					issue_and_commit(enc_mst_w(acc_regs[tile_in_group]), C_BASE + 32'(row_idx * (N_COLS * 4) + col_tile_idx * 16), ROW_STRIDE, next_id);
+				for (tile = 0; tile < tiles_in_group; tile++) begin
+					col_tile_idx = col_tile_start + tile;
+					issue_and_commit(enc_mst_w(acc_regs[tile]), C_BASE + 32'(row_idx * (N_COLS * 4) + col_tile_idx * 16), ROW_STRIDE, next_id);
 					next_id++; issued_cnt++;
 				end
+			end
+		end
+		end
+
+
+		if (run_dense) begin
+		for (int m = 0; m < M_PAD; m += 8) begin
+			for (int n = 0; n < N_PAD; n += 8) begin
+
+				// (m4..m7)
+				for (int acc = 4; acc < 8; acc++) begin
+					issue_and_commit(enc_mzero(3'(acc)), '0, '0, next_id);
+					next_id++; issued_cnt++;
+				end
+				wait (completed_results >= issued_cnt);
+				repeat (2) @(posedge clk_i);
+
+				for (int k = 0; k < K_PAD; k += 4) begin
+					a0 = A_BASE + (m       * K_PAD + k) * 4;
+					a4 = A_BASE + ((m + 4) * K_PAD + k) * 4;
+					b0 = BT_BASE + (n       * K_PAD + k) * 4;
+					b4 = BT_BASE + ((n + 4) * K_PAD + k) * 4;
+
+					issue_and_commit(enc_mld_w(3'd0), a0, ROW_STRIDE, next_id);
+					next_id++; issued_cnt++;
+
+					issue_and_commit(enc_mld_w(3'd1), b0, ROW_STRIDE, next_id);
+					next_id++; issued_cnt++;
+					wait (completed_results >= issued_cnt); repeat (2) @(posedge clk_i);
+
+					issue_and_commit(enc_mmasa_w(3'd0, 3'd1, 3'd4), '0, '0, next_id);
+					next_id++; issued_cnt++;
+
+					issue_and_commit(enc_mld_w(3'd2), a4, ROW_STRIDE, next_id);
+					next_id++; issued_cnt++;
+
+					issue_and_commit(enc_mmasa_w(3'd2, 3'd1, 3'd6), '0, '0, next_id);
+					next_id++; issued_cnt++;
+
+					issue_and_commit(enc_mld_w(3'd3), b4, ROW_STRIDE, next_id);
+					next_id++; issued_cnt++;
+
+					issue_and_commit(enc_mmasa_w(3'd0, 3'd3, 3'd5), '0, '0, next_id);
+					next_id++; issued_cnt++;
+
+					issue_and_commit(enc_mmasa_w(3'd2, 3'd3, 3'd7), '0, '0, next_id);
+					next_id++; issued_cnt++;
+				end
+
+				c00 = C_BASE + (m       * N_PAD + n)     * 4;
+				c01 = C_BASE + (m       * N_PAD + n + 4) * 4;
+				c10 = C_BASE + ((m + 4) * N_PAD + n)     * 4;
+				c11 = C_BASE + ((m + 4) * N_PAD + n + 4) * 4;
+
+				issue_and_commit(enc_mst_w(3'd4), c00, ROW_STRIDE, next_id);
+				next_id++; issued_cnt++;
+
+				issue_and_commit(enc_mst_w(3'd5), c01, ROW_STRIDE, next_id);
+				next_id++; issued_cnt++;
+
+				issue_and_commit(enc_mst_w(3'd6), c10, ROW_STRIDE, next_id);
+				next_id++; issued_cnt++;
+
+				issue_and_commit(enc_mst_w(3'd7), c11, ROW_STRIDE, next_id);
+				next_id++; issued_cnt++;
 				wait (completed_results >= issued_cnt); repeat (2) @(posedge clk_i);
 			end
+		end
 		end
 
 
 		repeat (10) @(posedge clk_i);
 
-		$display("\n[TIMING] %0d instructions", log_issue_ptr);
+		$display("\n[TB] Cycles: %0d, Instructions: %0d", cycle_count, log_issue_ptr);
+		/* $display("\n[TIMING] %0d instructions", log_issue_ptr);
 		$display("[TIMING] idx   name        xif_id  issue   complete  latency");
 		for (int i = 0; i < log_issue_ptr; i++) begin
 			$display("[TIMING] %4d  %-10s  %2d      %6d  %8d  %6d",
@@ -378,7 +502,7 @@ module quadrisparse_xif_tb;
 				instr_log[i].issue_cycle,
 				instr_log[i].complete_cycle,
 				instr_log[i].complete_cycle - instr_log[i].issue_cycle);
-		end
+		end */
 
 		//===========================================================================
 		// Compare result matrix at C_BASE against reference matrix at REF_BASE
@@ -408,7 +532,7 @@ module quadrisparse_xif_tb;
 			$display("\n[TB] FAIL -- %0d mismatches.", errors);
 		end
 
-		print_matrix(C_BASE, N_ROWS, N_COLS);
+		//print_matrix(C_BASE, N_ROWS, N_COLS);
 
 		$finish;
 	end
