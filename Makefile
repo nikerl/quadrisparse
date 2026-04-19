@@ -26,12 +26,16 @@ MAXVAL ?=
 # Optional runtime plusargs passed to the Verilator testbench binary.
 DATA_PREFIX ?=
 DIM ?=
-RUN_PLUSARGS :=
+FLOW ?=
+RUN_PLUSARGS := 
 ifneq ($(strip $(DATA_PREFIX)),)
 	RUN_PLUSARGS += +data_file_prefix=$(DATA_PREFIX)
 endif
 ifneq ($(strip $(DIM)),)
 	RUN_PLUSARGS += +dim=$(DIM)
+endif
+ifneq ($(strip $(FLOW)),)
+	RUN_PLUSARGS += +flow=$(FLOW)
 endif
 
 # Optional fallback flow (kept for convenience)
@@ -92,4 +96,6 @@ matgen:
 
 clean:
 	rm -rf $(BUILD_DIR)
+
+clean-mat:
 	rm *.hex

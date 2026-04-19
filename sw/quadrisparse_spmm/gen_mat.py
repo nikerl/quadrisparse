@@ -31,7 +31,8 @@ def generate_spmm_test_data(*args):
     # Sparse matrix in CSR format
     with open(f"mat_{SIZE}_{SPARSITY}_a_val.hex", "w") as f_val, \
          open(f"mat_{SIZE}_{SPARSITY}_a_col.hex", "w") as f_col, \
-         open(f"mat_{SIZE}_{SPARSITY}_a_row.hex", "w") as f_row:
+         open(f"mat_{SIZE}_{SPARSITY}_a_row.hex", "w") as f_row, \
+         open(f"mat_{SIZE}_{SPARSITY}_a.hex", "w") as f_sparse:
 
         row_ptr = 0
         f_row.write(f"{row_ptr:08x}\n")
@@ -44,9 +45,11 @@ def generate_spmm_test_data(*args):
                     sparse_matrix[i][j] = val
                     f_val.write(f"{val:08x}\n")
                     f_col.write(f"{j:08x}\n")
+                    f_sparse.write(f"{val:08x}\n")
                     row_ptr += 1
                 else:
                     sparse_matrix[i][j] = 0
+                    f_sparse.write(f"00000000\n")
             f_row.write(f"{row_ptr:08x}\n")
             
     
