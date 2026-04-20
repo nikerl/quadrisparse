@@ -22,6 +22,14 @@ VERILATOR_FLAGS ?= --binary --timing -Wall -Wno-fatal
 PYTHON_VENV ?= venv
 SPARSITY ?=
 MAXVAL ?=
+MATPATH ?=
+MATGEN_ARGS := --size $(DIM) --sparsity $(SPARSITY)
+ifneq ($(strip $(MAXVAL)),)
+	MATGEN_ARGS += --max_val $(MAXVAL)
+endif
+ifneq ($(strip $(MATPATH)),)
+	MATGEN_ARGS += --path $(MATPATH)
+endif
 
 # Optional runtime plusargs passed to the Verilator testbench binary.
 DATA_PREFIX ?=
@@ -92,7 +100,7 @@ run-iverilog: compile-iverilog
 	$(VVP) $(SIMV)
 
 matgen:
-	$(PYTHON_VENV)/bin/python sw/quadrisparse_spmm/gen_mat.py $(DIM) $(SPARSITY) $(MAXVAL)
+	$(PYTHON_VENV)/bin/python sw/quadrisparse_spmm/gen_mat.py $(MATGEN_ARGS)
 
 clean:
 	rm -rf $(BUILD_DIR)
