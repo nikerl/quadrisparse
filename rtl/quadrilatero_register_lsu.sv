@@ -126,7 +126,8 @@ module quadrilatero_register_lsu #(
   logic [$clog2(N_ROWS+1)-1:0] sparse_done_cnt_q;
   logic [$clog2(N_ROWS+1)-1:0] sparse_done_cnt_d;
 
-  assign mask_req     = (counter_q == $clog2(N_ROWS)'(N_ROWS - 1)) & finished_o & ~finished_ack_i;
+  assign mask_req     = (is_sparse_i ? (counter_q == $clog2(N_ROWS)'(N_ROWS/2 - 1))
+                                     : (counter_q == $clog2(N_ROWS)'(N_ROWS - 1))) & finished_o & ~finished_ack_i;
   always_comb begin
     lsu_id_o   = (write_i &~ load_fifo_data_available) ? instr_id_i : back_id_q;
 
@@ -153,7 +154,8 @@ module quadrilatero_register_lsu #(
     waddr_o    = waddr_q;
     wrowaddr_o = counter_q;
     wdata_o    = load_fifo_data & ~data_mask;
-    wlast_o    = (counter_q == $clog2(N_ROWS)'(N_ROWS - 1)) && we_o && wready_i;
+    wlast_o    = (is_sparse_i ? (counter_q == $clog2(N_ROWS)'(N_ROWS/2 - 1))
+                             : (counter_q == $clog2(N_ROWS)'(N_ROWS - 1))) && we_o && wready_i;
     if (is_sparse_i) begin
         wrowaddr_o = counter_q;
       wdata_o = load_fifo_data_available ? (load_fifo_data & sparse_lane_mask) : '0;
@@ -183,7 +185,11 @@ module quadrilatero_register_lsu #(
    always_comb begin: next_value
     // SPARSE LOAD CONTROL
     if (is_sparse_i) begin
-        if (we_o && wready_i) begin
+        if (start) begin
+            // Start at row N_ROWS/2 so zero-fills of rows N_ROWS/2..N_ROWS-1 happen
+            // while memory loads are in flight, overlapping with the memory latency.
+            counter_d = $clog2(N_ROWS)'(N_ROWS / 2);
+        end else if (we_o && wready_i) begin
             counter_d = wlast_o ? '0 : counter_q + 1;
         end else begin
             counter_d = counter_q;
@@ -213,10 +219,12 @@ module quadrilatero_register_lsu #(
     stride_d   = (start) ? stride : stride_q;
     src_ptr_d  = (start) ? address_i : src_ptr_q;
 
-    back_id_d = (load_fifo_valid && counter_d==0  && ~valid_q) ? instr_id_i    : 
+    back_id_d = (start && is_sparse_i)                          ? instr_id_i    :
+                (load_fifo_valid && counter_d==0  && ~valid_q) ? instr_id_i    :
                   rlast_o                                       ? lsu_id_o      : back_id_q;
 
-    waddr_d   = (load_fifo_valid && counter_d==0) ? operand_reg_i : waddr_q;
+    waddr_d   = (start && is_sparse_i)            ? operand_reg_i :
+                (load_fifo_valid && counter_d==0) ? operand_reg_i : waddr_q;
 
     busy_d = (write_i && rlast_o && rdata_valid_i) ? 1'b0 :
              (write_i && start_i)                  ? 1'b1 : busy_q;

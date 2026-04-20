@@ -1,0 +1,3 @@
+Below is a list of optimizations for the instructions.
+    SPLD_W:
+        - Reorder register writes to obverlap zero-fills to hide memory latency. Improvement: 13 cycles -> 11 cycles
