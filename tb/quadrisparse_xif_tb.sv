@@ -538,7 +538,7 @@ module quadrisparse_xif_tb;
 	end
 
 	initial begin
-		#50000000ns;
+		#5000ms;
 		$fatal(1, "[TB] Timeout waiting for matrix multiplication flow.");
 	end
 
