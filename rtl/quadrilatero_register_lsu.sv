@@ -31,7 +31,6 @@ module quadrilatero_register_lsu #(
 
     output logic[xif_pkg::X_ID_WIDTH-1:0] lsu_id_o            ,
 
-    // Register Write Port for load unit
     output logic [    $clog2(N_REGS)-1:0] waddr_o             ,
     output logic [    $clog2(N_ROWS)-1:0] wrowaddr_o          ,
     output logic [              RLEN-1:0] wdata_o             ,
@@ -149,7 +148,6 @@ module quadrilatero_register_lsu #(
         sparse_lane_mask[lane*EL_WIDTH +: EL_WIDTH] = '1;
       end
     end
-      // Default / force for sparse
     we_o       = (load_fifo_data_available | (is_sparse_i & counter_q[$clog2(N_ROWS)-1])) & ~mask_req;
     waddr_o    = waddr_q;
     wrowaddr_o = counter_q;
