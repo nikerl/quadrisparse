@@ -35,7 +35,7 @@ run_sim() {
     fi
 }
 
-for size in 384; do
+for size in 8 16 32 64 128 256 512; do
     # Running sparse for all sparsity levels
     for sparsity in 0.5 0.6 0.7 0.8 0.9 0.95; do
         # Temporary files to store results for averaging
