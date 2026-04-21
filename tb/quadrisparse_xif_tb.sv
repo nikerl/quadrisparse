@@ -17,12 +17,12 @@ module quadrisparse_xif_tb;
 	localparam int CLK_PERIOD_NS 	= 10;
 
 	string data_file_prefix;
-	int dim;
+	int size;
 
 	int N_ROWS;
 	int N_COLS;
 	int ROW_STRIDE;
-	// 2MB slots per buffer avoid overlap for DIM=512 (1MB matrices) and sparse tail writes.
+	// 2MB slots per buffer avoid overlap for SIZE=512 (1MB matrices) and sparse tail writes.
 	localparam logic [31:0] VAL_BASE      	= 32'h0000_0000;
 	localparam logic [31:0] COL_BASE      	= 32'h0020_0000;
 	localparam logic [31:0] A_BASE        	= 32'h0040_0000;
@@ -246,7 +246,7 @@ module quadrisparse_xif_tb;
 		logic signed [31:0] got_val, exp_val;
 		int errors;
 		int val_ptr;
-		string flow_mode;
+		string mode;
 		bit run_sparse;
 		bit run_dense;
 		int nnz_to_load;
@@ -287,33 +287,33 @@ module quadrisparse_xif_tb;
 		if (!$value$plusargs("data_file_prefix=%s", data_file_prefix)) begin
 			$fatal(1, "data file prefix argument not provided");
 		end
-		if (!$value$plusargs("dim=%0d", dim)) begin
-			$fatal(1, "dimension argument not provided");
+		if (!$value$plusargs("size=%0d", size)) begin
+			$fatal(1, "size argument not provided");
 		end
-		if (dim <= 0) begin
-			$fatal(1, "dimension must be positive, got %0d", dim);
+		if (size <= 0) begin
+			$fatal(1, "size must be positive, got %0d", size);
 		end
-		if ((dim % 4) != 0) begin
-			$fatal(1, "dimension must be divisible by 4, got %0d", dim);
+		if ((size % 4) != 0) begin
+			$fatal(1, "size must be divisible by 4, got %0d", size);
 		end
 
-		if (!$value$plusargs("flow=%s", flow_mode)) begin
-			flow_mode = "dense";
+		if (!$value$plusargs("mode=%s", mode)) begin
+			mode = "sparse";
 		end
-		run_sparse = (flow_mode == "sparse") || (flow_mode == "both");
-		run_dense  = (flow_mode == "dense")  || (flow_mode == "both");
+		run_sparse = (mode == "sparse") || (mode == "both");
+		run_dense  = (mode == "dense")  || (mode == "both");
 		if (!run_sparse && !run_dense) begin
-			$fatal(1, "Unsupported flow='%s' (use dense|sparse|both)", flow_mode);
+			$fatal(1, "Unsupported mode='%s' (use dense|sparse|both)", mode);
 		end
 
-		N_ROWS = dim;
-		N_COLS = dim;
+		N_ROWS = size;
+		N_COLS = size;
 		ROW_STRIDE = N_COLS * 4;
 		row_ptrs = new[N_ROWS + 1];
 
-		M_PAD = ((dim + 7) / 8) * 8;
-		N_PAD = ((dim + 7) / 8) * 8;
-		K_PAD = ((dim + 3) / 4) * 4;
+		M_PAD = ((size + 7) / 8) * 8;
+		N_PAD = ((size + 7) / 8) * 8;
+		K_PAD = ((size + 3) / 4) * 4;
 
 		for (int i = 0; i < $size(mem_model); i++) mem_model[i] = '0;
 		for (int i = 0; i < 16;  i++) id_to_log_idx[i] = 0;

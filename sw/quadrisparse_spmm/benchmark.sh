@@ -19,7 +19,7 @@ run_sim() {
     local sparsity=$3
     local temp_array=$4
 
-    output=$(make run DATA_PREFIX=$BENCHMARK_DIR/mat_${size}_${sparsity} DIM=$size FLOW=$mode 2>&1)
+    output=$(make run DATA_PREFIX=$BENCHMARK_DIR/mat_${size}_${sparsity} SIZE=$size MODE=$mode 2>&1)
     last_lines=$(echo "$output" | tail -n 15)
     if echo "$last_lines" | grep -q "PASS"; then
         stats_line=$(echo "$last_lines" | grep "\[TB\] Cycles:")
@@ -44,7 +44,7 @@ for size in 8 16 32 64 128 256 512; do
 
         # Running sparse multiple times for averaging because of variability from random matrix generation
         for run in {1..$NUM_RUNS}; do
-            make matgen DIM=$size SPARSITY=$sparsity MATPATH=$BENCHMARK_DIR > /dev/null
+            make matgen SIZE=$size SPARSITY=$sparsity MATPATH=$BENCHMARK_DIR > /dev/null
             run_sim "sparse" $size $sparsity "$tmp_sparse"
         done
         # Average results for sparse
@@ -60,7 +60,7 @@ for size in 8 16 32 64 128 256 512; do
     tmp_dense=$(mktemp)
     echo "Running size: $size, dense"
 
-    make matgen DIM=$size SPARSITY=1.0 MATPATH=$BENCHMARK_DIR > /dev/null
+    make matgen SIZE=$size SPARSITY=1.0 MATPATH=$BENCHMARK_DIR > /dev/null
 
     # Running dense once, because it is not affected by sparsity or random matrix generation
     run_sim "dense" $size 1.0 "$tmp_dense"
