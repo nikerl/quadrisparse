@@ -27,14 +27,14 @@ pip install numpy
 ```
 
 ### Running simulation
-Generate test data. DIM: number of rows, SPARSITY: Ammount of sparsity 0-1,  MAXVAL: Maximum value of the elements (optional).
+Generate test data. SIZE: number of rows, SPARSITY: Ammount of sparsity 0-1,  MAXVAL: Maximum value of the elements (optional).
 ```bash
-make matgen DIM=16 SPARSITY=0.8 MAXVAL=15
+make matgen SIZE=16 SPARSITY=0.8 MAXVAL=15
 ```
 
-Compile and run:
+Compile and run. MODE (sparse, dense) switches between the new sparse optimized multiplication and the traditional dense. 
 ```bash
-make run DATA_PREFIX=mat_16_0.8 DIM=16
+make run DATA_PREFIX=mat_16_0.8 SIZE=16 MODE=sparse
 ```
 
 ### Notes

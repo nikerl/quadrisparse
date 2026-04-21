@@ -23,7 +23,7 @@ PYTHON_VENV ?= venv
 SPARSITY ?=
 MAXVAL ?=
 MATPATH ?=
-MATGEN_ARGS := --size $(DIM) --sparsity $(SPARSITY)
+MATGEN_ARGS := --size $(SIZE) --sparsity $(SPARSITY)
 ifneq ($(strip $(MAXVAL)),)
 	MATGEN_ARGS += --max_val $(MAXVAL)
 endif
@@ -34,16 +34,16 @@ endif
 # Optional runtime plusargs passed to the Verilator testbench binary.
 DATA_PREFIX ?=
 DIM ?=
-FLOW ?=
+MODE ?=
 RUN_PLUSARGS := 
 ifneq ($(strip $(DATA_PREFIX)),)
 	RUN_PLUSARGS += +data_file_prefix=$(DATA_PREFIX)
 endif
-ifneq ($(strip $(DIM)),)
-	RUN_PLUSARGS += +dim=$(DIM)
+ifneq ($(strip $(SIZE)),)
+	RUN_PLUSARGS += +size=$(SIZE)
 endif
-ifneq ($(strip $(FLOW)),)
-	RUN_PLUSARGS += +flow=$(FLOW)
+ifneq ($(strip $(MODE)),)
+	RUN_PLUSARGS += +mode=$(MODE)
 endif
 
 # Optional fallback flow (kept for convenience)
