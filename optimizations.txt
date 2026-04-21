@@ -1,3 +1,10 @@
 Below is a list of optimizations for the instructions.
     SPLD_W:
         - Reorder register writes to obverlap zero-fills to hide memory latency. Improvement: 13 cycles -> 11 cycles
+
+    SPMAC_W:
+        - Original version of the SPMAC instruction uses the skewer. First optimization I found was to actually skip the FS stage completely, instead doing conditionals to fetch data from the FF stage and update signals accordingly. Theoretically could save 4 but seems to improve by 3 cycles. Haven't found where the last cycle goes but probably overhead somewhere.
+
+
+Limitations:
+    DLD_W: With the current hardware constraints, the RF protocol forces us to drain all N rows which means READ_INDEX_ROW always costs us 8 cycles regardless which row holds the indices. OBI bridge has no outstanding transactions so all memory reads are forced to be sequential. Architectural improvements could solve this by doing pipelining thus masking the latency of the fetches. 
