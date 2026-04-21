@@ -2,10 +2,15 @@
 Bender.lock
 .bender/
 build/
-.vscode/
 
 # Python virtual environment
 venv/
 
+# Benchmark results
+benchmark/
+
 # Data files
 *.hex
+
+# IDE files
+.vscode/

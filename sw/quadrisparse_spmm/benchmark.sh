@@ -71,4 +71,4 @@ for size in 8 16 32 64 128 256 512; do
     rm -f "$tmp_dense"
 done
 
-rm -rf $BENCHMARK_DIR
+rm -f $BENCHMARK_DIR/*.hex
