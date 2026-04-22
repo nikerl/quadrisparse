@@ -1,4 +1,4 @@
-# Basic standalone simulation flow for quadrilatero_xif_tb.
+# Basic standalone simulation flow for quadrisparse_xif_tb.
 # Requires: bender, verilator
 
 SHELL := /bin/bash
@@ -8,8 +8,8 @@ ifeq (,$(filter -j% --jobs=% --jobs% --jobserver%,$(MAKEFLAGS)))
 MAKEFLAGS += -j$(shell nproc)
 endif
 
-TOP      ?= quadrilatero_xif_tb
-TB_FILE  ?= tb/quadrilatero_xif_tb.sv
+TOP      ?= quadrisparse_xif_tb
+TB_FILE  ?= tb/quadrisparse_xif_tb.sv
 BUILD_DIR ?= build
 FLIST    ?= $(BUILD_DIR)/flist.f
 SIMV     ?= $(BUILD_DIR)/simv
@@ -18,6 +18,33 @@ VERILATOR_SIMV ?= $(OBJ_DIR)/$(notdir $(SIMV))
 
 VERILATOR ?= verilator
 VERILATOR_FLAGS ?= --binary --timing -Wall -Wno-fatal
+
+PYTHON_VENV ?= venv
+SPARSITY ?=
+MAXVAL ?=
+MATPATH ?=
+MATGEN_ARGS := --size $(SIZE) --sparsity $(SPARSITY)
+ifneq ($(strip $(MAXVAL)),)
+	MATGEN_ARGS += --max_val $(MAXVAL)
+endif
+ifneq ($(strip $(MATPATH)),)
+	MATGEN_ARGS += --path $(MATPATH)
+endif
+
+# Optional runtime plusargs passed to the Verilator testbench binary.
+DATA_PREFIX ?=
+DIM ?=
+MODE ?=
+RUN_PLUSARGS := 
+ifneq ($(strip $(DATA_PREFIX)),)
+	RUN_PLUSARGS += +data_file_prefix=$(DATA_PREFIX)
+endif
+ifneq ($(strip $(SIZE)),)
+	RUN_PLUSARGS += +size=$(SIZE)
+endif
+ifneq ($(strip $(MODE)),)
+	RUN_PLUSARGS += +mode=$(MODE)
+endif
 
 # Optional fallback flow (kept for convenience)
 IVERILOG ?= iverilog
@@ -52,6 +79,7 @@ flist: $(FLIST)
 $(FLIST): | $(BUILD_DIR)
 	@tmp="$@.tmp"; \
 	$(BENDER) script flist-plus | grep -v 'pad_functional\.sv' > "$$tmp"; \
+	printf "%s\n" "+incdir+tb" >> "$$tmp"; \
 	printf "%s\n" "$(TB_FILE)" >> "$$tmp"; \
 	if [ -f "$@" ] && cmp -s "$$tmp" "$@"; then rm -f "$$tmp"; else mv -f "$$tmp" "$@"; fi
 
@@ -63,7 +91,7 @@ $(VERILATOR_SIMV): $(FLIST) $(RTL_SRCS) Bender.yml
 	$(VERILATOR) $(VERILATOR_FLAGS) --top-module $(TOP) -f $(FLIST) --Mdir $(OBJ_DIR) -o $(notdir $(SIMV))
 
 run: $(VERILATOR_SIMV)
-	$(VERILATOR_SIMV)
+	$(VERILATOR_SIMV) $(RUN_PLUSARGS)
 
 compile-iverilog: flist
 	$(IVERILOG) -g2012 -s $(TOP) -o $(SIMV) -f $(FLIST)
@@ -71,5 +99,11 @@ compile-iverilog: flist
 run-iverilog: compile-iverilog
 	$(VVP) $(SIMV)
 
+matgen:
+	$(PYTHON_VENV)/bin/python sw/quadrisparse_spmm/gen_mat.py $(MATGEN_ARGS)
+
 clean:
 	rm -rf $(BUILD_DIR)
+
+clean-mat:
+	rm *.hex
