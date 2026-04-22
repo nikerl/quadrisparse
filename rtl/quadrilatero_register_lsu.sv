@@ -91,8 +91,11 @@ module quadrilatero_register_lsu #(
   logic [RLEN-1:0] store_fifo_data;
 
   logic [RLEN-1:0] data_mask;
+  logic [RLEN-1:0] sparse_aligned_data;
   logic [RLEN-1:0] sparse_lane_mask;
   logic [$clog2(N_ROWS+1)-1:0] sparse_nnz_clamped;
+  logic [$clog2(N_ROWS)-1:0] sparse_lane_offset_q;
+  logic [$clog2(N_ROWS)-1:0] sparse_lane_offset_d;
   logic load_fifo_valid;
   logic busy;
   logic start;
@@ -141,6 +144,7 @@ module quadrilatero_register_lsu #(
   always_comb begin: write_to_RF
       // Default assignments
     data_mask  = '1 << (8 * n_bytes_cols_i);
+    sparse_aligned_data = load_fifo_data >> (sparse_lane_offset_q * EL_WIDTH);
     sparse_lane_mask  = '0;
     sparse_nnz_clamped = (nnz_to_load_i > N_ROWS) ? $clog2(N_ROWS+1)'(N_ROWS) : $clog2(N_ROWS+1)'(nnz_to_load_i);
     for (int lane = 0; lane < N_ROWS; lane++) begin
@@ -156,7 +160,7 @@ module quadrilatero_register_lsu #(
                              : (counter_q == $clog2(N_ROWS)'(N_ROWS - 1))) && we_o && wready_i;
     if (is_sparse_i) begin
         wrowaddr_o = counter_q;
-      wdata_o = load_fifo_data_available ? (load_fifo_data & sparse_lane_mask) : '0;
+      wdata_o = load_fifo_data_available ? (sparse_aligned_data & sparse_lane_mask) : '0;
     end
   end
 
@@ -216,6 +220,7 @@ module quadrilatero_register_lsu #(
 
     stride_d   = (start) ? stride : stride_q;
     src_ptr_d  = (start) ? address_i : src_ptr_q;
+    sparse_lane_offset_d = start ? address_i[$clog2(N_ROWS)+1:2] : sparse_lane_offset_q;
 
     back_id_d = (start && is_sparse_i)                          ? instr_id_i    :
                 (load_fifo_valid && counter_d==0  && ~valid_q) ? instr_id_i    :
@@ -242,6 +247,7 @@ module quadrilatero_register_lsu #(
       lsu_busy_q <= '0;
       src_ptr_q  <= '0;
       stride_q   <= '0;
+      sparse_lane_offset_q <= '0;
     end else begin
       counter_q <= counter_d;
       back_id_q <= back_id_d;
@@ -254,6 +260,7 @@ module quadrilatero_register_lsu #(
       lsu_busy_q <= busy;
       src_ptr_q  <= src_ptr_d;
       stride_q   <= stride_d ;
+      sparse_lane_offset_q <= sparse_lane_offset_d;
     end
   end
 
