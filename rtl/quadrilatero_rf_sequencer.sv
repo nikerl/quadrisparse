@@ -157,8 +157,16 @@ module quadrilatero_rf_sequencer #(
           scoreboard_q[m][n].rvalid && rready_i[jj]   ) 
         begin
           rd_req [jj] = 1'b1;
-          r_clr  [m][n] = rd_gnt[jj];
-          r_pop  [m][n] = rd_gnt[jj] &~ scoreboard_q[m][n].wready;
+          // LSU read port uses one dependency entry per row; on final beat, release all rows.
+          if ((jj == quadrilatero_pkg::LSU_R) && rlast_i[jj]) begin
+            for (int h = 0; h < N_ROWS; h++) begin
+              r_clr[m][h] = rd_gnt[jj];
+              r_pop[m][h] = rd_gnt[jj] &~ scoreboard_q[m][h].wready;
+            end
+          end else begin
+            r_clr  [m][n] = rd_gnt[jj];
+            r_pop  [m][n] = rd_gnt[jj] &~ scoreboard_q[m][n].wready;
+          end
       end
     end
 

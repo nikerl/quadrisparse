@@ -1137,7 +1137,7 @@ module quadrilatero
 
   // Results XIF interface fifo
   fifo_v3 #(
-      .FALL_THROUGH(0),
+      .FALL_THROUGH(1),
       .DATA_WIDTH  (xif_pkg::X_ID_WIDTH            ),
       .DEPTH       (RES_IF_FIFO_DEPTH              ),
       .dtype       (logic [xif_pkg::X_ID_WIDTH-1:0])
