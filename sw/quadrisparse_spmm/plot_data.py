@@ -159,7 +159,7 @@ def plot_latency_relative(df):
         ax.plot(mat_sizes, norm_latency, marker='o', label=f"Sparsity: {sparsity*100:.0f}%")
         
     ax.set_xlabel('Matrix Size', fontsize=12)
-    ax.set_ylabel('Relative Latency', fontsize=12)
+    ax.set_ylabel('Relative Latency in Cycles', fontsize=12)
     ax.set_title('Latency Relative to Dense', fontsize=14, fontweight='bold')
     ax.set_xscale('log')
     ax.set_xticks(mat_sizes)
