@@ -145,22 +145,25 @@ def plot_latency_difference(df):
     
 
 def plot_latency_relative(df):
+    df = df[df['mat_size'] >= 16]
+    
     fig, ax = plt.subplots(figsize=(10, 6))
     mat_sizes = sorted(df['mat_size'].unique())
     
     dense_cy = df[df["sparsity"] == 1.0]["avg_cycles"]
-    ax.plot(mat_sizes, np.ones(len(mat_sizes)), marker='s', color='black', label=f"Dense")
+    ax.plot(mat_sizes, np.ones(len(mat_sizes)), color='black', label=f"Dense", linewidth=3)
     
     for sparsity in sorted(df["sparsity"].unique()):
         if sparsity < 0.7 or sparsity == 1.0:
             continue
         sparse_subset = df[df["sparsity"] == sparsity]
-        norm_latency = sparse_subset["avg_cycles"] / dense_cy.values
+        norm_latency = dense_cy.values / sparse_subset["avg_cycles"]
+        print(f"Sparsity: {sparsity*100:.0f}%, \n{norm_latency.values}")
         ax.plot(mat_sizes, norm_latency, marker='o', label=f"Sparsity: {sparsity*100:.0f}%")
         
     ax.set_xlabel('Matrix Size', fontsize=12)
-    ax.set_ylabel('Relative Latency in Cycles', fontsize=12)
-    ax.set_title('Latency Relative to Dense', fontsize=14, fontweight='bold')
+    ax.set_ylabel('Relative Latency (Cycles)', fontsize=12)
+    ax.set_title('Speedup Relative to Dense', fontsize=14, fontweight='bold')
     ax.set_xscale('log')
     ax.set_xticks(mat_sizes)
     ax.set_xticklabels(mat_sizes)
