@@ -393,7 +393,6 @@ module quadrisparse_xif_tb;
 					issue_and_commit(enc_spld_w(3'd0, 3'(nnz_to_load)), VAL_BASE + val_ptr * 4, COL_BASE + val_ptr * 4, next_id); 
 					next_id++; issued_cnt++;
 					val_ptr = val_ptr + nnz_to_load;
-					wait (completed_results >= issued_cnt); repeat (1) @(posedge clk_i);
 
 					for (tile = 0; tile <= tiles_in_group; tile++) begin
 						if (tile < tiles_in_group) begin

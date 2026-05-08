@@ -182,7 +182,7 @@ module quadrilatero_register_lsu #(
     store_fifo_push = rdata_ready_o && rdata_valid_i;
     lsu_ready = store_fifo_empty | (write_i &~ load_fifo_data_available &~ lsu_busy_q);
     start  = (start_i | start_q) & lsu_ready;
-    busy_o = (write_i ? (busy_d | busy) : busy | (load_fifo_data_available & counter_d == '0)) | start_q;
+    busy_o = (write_i ? (busy_d | busy) : busy | (is_sparse_i & we_o) | (load_fifo_data_available & counter_d == '0)) | start_q;
     stride  = (start) ? (is_sparse_i ? (stride_i - address_i) : stride_i) : stride_q;
     src_ptr = (start) ? address_i : src_ptr_q;
   end
