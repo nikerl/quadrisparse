@@ -404,7 +404,6 @@ module quadrisparse_xif_tb;
 						end
 
 						if (tile > 0) begin
-							wait (instr_log[id_to_log_idx[dld_ids[tile-1]]].complete_cycle != '1);
 							spmac_ids[tile-1] = next_id;
 							issue_and_commit(enc_spmac_w(3'd0, dense_regs[(tile-1) % 2], acc_regs[tile-1]), 32'd0, 32'd0, next_id); 
 							next_id++; issued_cnt++;
@@ -489,6 +488,7 @@ module quadrisparse_xif_tb;
 		end
 
 
+		wait (completed_results >= issued_cnt);
 		repeat (10) @(posedge clk_i);
 
 		$display("\n[TB] Cycles: %0d, Instructions: %0d", cycle_count, log_issue_ptr);
@@ -538,8 +538,8 @@ module quadrisparse_xif_tb;
 	end
 
 	initial begin
-		#5000ms;
-		$fatal(1, "[TB] Timeout waiting for matrix multiplication flow.");
+		#5000us;
+		$fatal(1, "[TB] Timeout: cycle=%0d issued=%0d completed=%0d", cycle_count, log_issue_ptr, completed_results);
 	end
 
 endmodule

@@ -145,7 +145,7 @@ module quadrilatero_lsu #(
       cols_d = cols_q;
 
       if(start_i) begin
-        if(data_gnt_i && data_req_o) begin
+        if(data_gnt_i && data_req_o && !write_i) begin
           if(cols_i > 1) begin
             rows_d = rows_i - 1;
             cols_d = cols_i - 2;

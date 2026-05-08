@@ -174,12 +174,15 @@ module quadrilatero_register_lsu #(
 
 
   always_comb begin: lsu_ctrl_block
-    load_fifo_pop   = wready_i;
+    // For sparse loads: don't pop the data FIFO during zero-fill rows (counter MSB=1).
+    // Those rows are filled with zeros while data loads overlap; actual data is consumed
+    // only when writing rows 0..N_ROWS/2-1 (counter MSB=0).
+    load_fifo_pop = wready_i & (is_sparse_i ? ~counter_q[$clog2(N_ROWS)-1] : 1'b1);
     store_fifo_data = rdata_i;
     store_fifo_push = rdata_ready_o && rdata_valid_i;
     lsu_ready = store_fifo_empty | (write_i &~ load_fifo_data_available &~ lsu_busy_q);
     start  = (start_i | start_q) & lsu_ready;
-    busy_o = (write_i ? busy_d : busy | (load_fifo_data_available & counter_d == '0)) | start_q;
+    busy_o = (write_i ? (busy_d | busy) : busy | (load_fifo_data_available & counter_d == '0)) | start_q;
     stride  = (start) ? (is_sparse_i ? (stride_i - address_i) : stride_i) : stride_q;
     src_ptr = (start) ? address_i : src_ptr_q;
   end

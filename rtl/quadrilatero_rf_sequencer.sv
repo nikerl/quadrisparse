@@ -280,7 +280,7 @@ module quadrilatero_rf_sequencer #(
   end
   
   always_ff @(posedge clk_i or negedge rst_ni) begin: seq_block
-    if (!rst_ni) begin 
+    if (!rst_ni) begin
       scoreboard_q <= '0;
     end else begin
       scoreboard_q <= scoreboard_d;
