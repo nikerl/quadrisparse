@@ -17,6 +17,7 @@ module quadrisparse_xif_tb;
 	localparam int CLK_PERIOD_NS 	= 10;
 
 	string data_file_prefix;
+	string trace_file;
 	int size;
 
 	int N_ROWS;
@@ -24,14 +25,14 @@ module quadrisparse_xif_tb;
 	int ROW_STRIDE;
 	// 2MB slots per buffer avoid overlap for SIZE=512 (1MB matrices) and sparse tail writes.
 	localparam logic [31:0] VAL_BASE      	= 32'h0000_0000;
-	localparam logic [31:0] COL_BASE      	= 32'h0020_0000;
-	localparam logic [31:0] A_BASE        	= 32'h0040_0000;
-	localparam logic [31:0] B_BASE        	= 32'h0060_0000;
-	localparam logic [31:0] C_BASE		  	= 32'h0080_0000;
-	localparam logic [31:0] REF_BASE      	= 32'h00A0_0000;
-	localparam logic [31:0] BT_BASE       	= 32'h00C0_0000;
+	localparam logic [31:0] COL_BASE      	= 32'h0200_0000;
+	localparam logic [31:0] A_BASE        	= 32'h0400_0000;
+	localparam logic [31:0] B_BASE        	= 32'h0600_0000;
+	localparam logic [31:0] C_BASE		  	= 32'h0800_0000;
+	localparam logic [31:0] REF_BASE      	= 32'h0A00_0000;
+	localparam logic [31:0] BT_BASE       	= 32'h0C00_0000;
 
-	localparam logic [31:0] MEM_MODEL_DEPTH = 32'h0010_0000;
+	localparam logic [31:0] MEM_MODEL_DEPTH = 32'h0200_0000;
 	localparam int MAX_INSTRS 	= MEM_MODEL_DEPTH;
 
 	int M_PAD;
@@ -98,6 +99,8 @@ module quadrisparse_xif_tb;
 
 	typedef struct {
 		longint unsigned issue_cycle;
+		longint unsigned dispatch_cycle;
+		longint unsigned finish_cycle;
 		longint unsigned complete_cycle;
 		string           name;
 		logic [3:0]      xif_id;
@@ -106,6 +109,12 @@ module quadrisparse_xif_tb;
 	instr_log_t instr_log [0:MAX_INSTRS-1];
 	int         log_issue_ptr             = 0;
 	int         id_to_log_idx [0:15];
+	bit         dispatch_seen [0:15];
+	bit         finish_seen [0:15];
+	int         trace_fd;
+	string      id_unit [0:15];
+	string      id_instr [0:15];
+	bit         id_active [0:15];
 
 
 	// Clock generation and cycle counting
@@ -164,21 +173,28 @@ module quadrisparse_xif_tb;
 			completed_results <= completed_results + 1;
 			instr_log[id_to_log_idx[x_result.id]].complete_cycle = cycle_count;
 			// Print completed instructions
-			/* $display("[TB] COMPLETE %-10s id=%0d log=%0d (cycle %0d, latency=%0d)",
+			/* $display("[TB] COMPLETE %-10s id=%0d log=%0d (cycle %0d, issue_lat=%0d, dispatch_lat=%0d)",
 				instr_log[id_to_log_idx[x_result.id]].name,
 				x_result.id,
 				id_to_log_idx[x_result.id],
 				cycle_count,
-				cycle_count - instr_log[id_to_log_idx[x_result.id]].issue_cycle); */
+				cycle_count - instr_log[id_to_log_idx[x_result.id]].issue_cycle,
+				(instr_log[id_to_log_idx[x_result.id]].dispatch_cycle == '1)
+					? 0
+					: cycle_count - instr_log[id_to_log_idx[x_result.id]].dispatch_cycle); */
 		end
 	end
 
 	always @(posedge clk_i) begin
 		if (x_issue_valid && x_issue_ready) begin
 			instr_log[log_issue_ptr].issue_cycle    = cycle_count;
+			instr_log[log_issue_ptr].dispatch_cycle = '1;
+			instr_log[log_issue_ptr].finish_cycle   = '1;
 			instr_log[log_issue_ptr].complete_cycle = '1;
 			instr_log[log_issue_ptr].xif_id         = x_issue_req.id;
 			id_to_log_idx[x_issue_req.id]           = log_issue_ptr;
+			dispatch_seen[x_issue_req.id]            = 1'b0;
+			finish_seen[x_issue_req.id]              = 1'b0;
 
 			casez (x_issue_req.instr)
 				quadrilatero_instr_pkg::SPLD_W  : instr_log[log_issue_ptr].name = "SPLD_W";
@@ -198,6 +214,147 @@ module quadrisparse_xif_tb;
 				instr_log[log_issue_ptr].name, x_issue_req.id, log_issue_ptr, cycle_count); */
 
 			log_issue_ptr = log_issue_ptr + 1;
+		end
+	end
+
+	// Capture dispatch cycle (start of execution in an FU)
+	always @(posedge clk_i) begin
+		if (|dut.dispatcher_dispatch) begin
+			int disp_idx;
+			logic [3:0] disp_id;
+
+			disp_id = dut.dispatcher_instr_id_out;
+			disp_idx = id_to_log_idx[disp_id];
+			if ((disp_idx >= 0) && !dispatch_seen[disp_id]) begin
+				dispatch_seen[disp_id] = 1'b1;
+				instr_log[disp_idx].dispatch_cycle = cycle_count;
+				/* $display("[TB] DISPATCH %-10s id=%0d log=%0d (cycle %0d)",
+					instr_log[disp_idx].name, disp_id, disp_idx, cycle_count); */
+			end
+		end
+	end
+
+	// CSV trace: instruction start/end per FU for Gantt plotting
+	always @(posedge clk_i) begin
+		if (dut.perm_start) begin
+			logic [3:0] perm_id;
+			perm_id = dut.perm_unit_instr_id;
+			id_unit[perm_id]  = "PERM";
+			id_instr[perm_id] = "MZERO";
+			id_active[perm_id] = 1'b1;
+			$fdisplay(trace_fd, "%0d,PERM,MZERO,%0d,START", cycle_count, perm_id);
+		end
+
+		if (dut.lsu_ctrl_start) begin
+			logic [3:0] lsu_id;
+			lsu_id = dut.lsu_ctrl_issued_instr.id;
+			if (dut.lsu_ctrl_issued_instr.is_store) begin
+				id_unit[lsu_id]  = "LSU";
+				id_instr[lsu_id] = "MST";
+				id_active[lsu_id] = 1'b1;
+				$fdisplay(trace_fd, "%0d,LSU,MST,%0d,START", cycle_count, lsu_id);
+			end else if (dut.lsu_ctrl_issued_instr.is_sparse) begin
+				id_unit[lsu_id]  = "LSU";
+				id_instr[lsu_id] = "SPLD";
+				id_active[lsu_id] = 1'b1;
+				$fdisplay(trace_fd, "%0d,LSU,SPLD,%0d,START", cycle_count, lsu_id);
+			end else if (dut.lsu_ctrl_issued_instr.is_dense) begin
+				id_unit[lsu_id]  = "LSU";
+				id_instr[lsu_id] = "DLD";
+				id_active[lsu_id] = 1'b1;
+				$fdisplay(trace_fd, "%0d,LSU,DLD,%0d,START", cycle_count, lsu_id);
+			end else begin
+				id_unit[lsu_id]  = "LSU";
+				id_instr[lsu_id] = "MLD";
+				id_active[lsu_id] = 1'b1;
+				$fdisplay(trace_fd, "%0d,LSU,MLD,%0d,START", cycle_count, lsu_id);
+			end
+		end
+
+		if (dut.sa_ctrl_start && dut.sa_ctrl_issued_instr.sa_ctrl.is_spmac) begin
+			logic [3:0] sa_id;
+			sa_id = dut.sa_ctrl_issued_instr.id;
+			id_unit[sa_id]  = "SA";
+			id_instr[sa_id] = "SPMAC";
+			id_active[sa_id] = 1'b1;
+			$fdisplay(trace_fd, "%0d,SA,SPMAC,%0d,START", cycle_count, sa_id);
+		end else if (dut.sa_ctrl_start) begin
+			logic [3:0] sa_id;
+			sa_id = dut.sa_ctrl_issued_instr.id;
+			id_unit[sa_id]  = "SA";
+			id_instr[sa_id] = "MMASA";
+			id_active[sa_id] = 1'b1;
+			$fdisplay(trace_fd, "%0d,SA,MMASA,%0d,START", cycle_count, sa_id);
+		end
+
+		if (dut.perm_unit_finished) begin
+			logic [3:0] perm_fin_id;
+			perm_fin_id = dut.perm_unit_finished_instr_id;
+			if (id_active[perm_fin_id] && id_instr[perm_fin_id] == "MZERO") begin
+				id_active[perm_fin_id] = 1'b0;
+				$fdisplay(trace_fd, "%0d,PERM,MZERO,%0d,END", cycle_count, perm_fin_id);
+			end
+		end
+
+		if (dut.lsu_finished) begin
+			logic [3:0] lsu_fin_id;
+			lsu_fin_id = dut.lsu_finished_instr_id;
+			if (id_active[lsu_fin_id] && id_instr[lsu_fin_id] == "SPLD") begin
+				id_active[lsu_fin_id] = 1'b0;
+				$fdisplay(trace_fd, "%0d,LSU,SPLD,%0d,END", cycle_count, lsu_fin_id);
+			end else if (id_active[lsu_fin_id] && id_instr[lsu_fin_id] == "MST") begin
+				id_active[lsu_fin_id] = 1'b0;
+				$fdisplay(trace_fd, "%0d,LSU,MST,%0d,END", cycle_count, lsu_fin_id);
+			end else if (id_active[lsu_fin_id] && id_instr[lsu_fin_id] == "MLD") begin
+				id_active[lsu_fin_id] = 1'b0;
+				$fdisplay(trace_fd, "%0d,LSU,MLD,%0d,END", cycle_count, lsu_fin_id);
+			end
+		end
+
+		if (dut.lsu_dld_finished) begin
+			logic [3:0] dld_fin_id;
+			dld_fin_id = dut.lsu_dld_finished_instr_id;
+			if (id_active[dld_fin_id] && id_instr[dld_fin_id] == "DLD") begin
+				id_active[dld_fin_id] = 1'b0;
+				$fdisplay(trace_fd, "%0d,LSU,DLD,%0d,END", cycle_count, dld_fin_id);
+			end
+		end
+
+		if (dut.sa_finished) begin
+			logic [3:0] sa_fin_id;
+			sa_fin_id = dut.sa_finished_instr_id;
+			if (id_active[sa_fin_id] && id_instr[sa_fin_id] == "SPMAC") begin
+				id_active[sa_fin_id] = 1'b0;
+				$fdisplay(trace_fd, "%0d,SA,SPMAC,%0d,END", cycle_count, sa_fin_id);
+			end else if (id_active[sa_fin_id] && id_instr[sa_fin_id] == "MMASA") begin
+				id_active[sa_fin_id] = 1'b0;
+				$fdisplay(trace_fd, "%0d,SA,MMASA,%0d,END", cycle_count, sa_fin_id);
+			end
+		end
+	end
+
+	// Capture FU finish cycle (before result FIFO)
+	always @(posedge clk_i) begin
+		for (int fu = 0; fu < quadrilatero_pkg::NUM_EXEC_UNITS; fu++) begin
+			if (dut.x_res_finished[fu]) begin
+				int fin_idx;
+				logic [3:0] fin_id;
+
+				fin_id = dut.x_res_finished_id[fu];
+				fin_idx = id_to_log_idx[fin_id];
+				if ((fin_idx >= 0) && !finish_seen[fin_id]) begin
+					finish_seen[fin_id] = 1'b1;
+					instr_log[fin_idx].finish_cycle = cycle_count;
+					/* $display("[TB] FINISH   %-10s id=%0d log=%0d (cycle %0d, exec_lat=%0d)",
+						instr_log[fin_idx].name,
+						fin_id,
+						fin_idx,
+						cycle_count,
+						(instr_log[fin_idx].dispatch_cycle == '1)
+							? 0
+							: cycle_count - instr_log[fin_idx].dispatch_cycle); */
+				end
+			end
 		end
 	end
 
@@ -316,7 +473,23 @@ module quadrisparse_xif_tb;
 		K_PAD = ((size + 3) / 4) * 4;
 
 		for (int i = 0; i < $size(mem_model); i++) mem_model[i] = '0;
-		for (int i = 0; i < 16;  i++) id_to_log_idx[i] = 0;
+		for (int i = 0; i < 16;  i++) begin
+			id_to_log_idx[i] = -1;
+			dispatch_seen[i] = 1'b0;
+			finish_seen[i]   = 1'b0;
+			id_unit[i]       = "";
+			id_instr[i]      = "";
+			id_active[i]     = 1'b0;
+		end
+
+		if (!$value$plusargs("trace_file=%s", trace_file)) begin
+			trace_file = "trace.csv";
+		end
+		trace_fd = $fopen(trace_file, "w");
+		if (trace_fd == 0) begin
+			$fatal(1, "[TB] Failed to open trace CSV");
+		end
+		$fdisplay(trace_fd, "cycle,unit,instr,id,event");
 
 		//===========================================================================
 		// Load matricies from data files
@@ -394,19 +567,15 @@ module quadrisparse_xif_tb;
 					next_id++; issued_cnt++;
 					val_ptr = val_ptr + nnz_to_load;
 
-					for (tile = 0; tile <= tiles_in_group; tile++) begin
-						if (tile < tiles_in_group) begin
-							col_tile_idx = col_tile_start + tile;
-							dld_ids[tile] = next_id;
-							issue_and_commit(enc_dld_w(dense_regs[tile % 2], 3'd0), B_BASE + 32'(col_tile_idx * 16), ROW_STRIDE, next_id); 
-							next_id++; issued_cnt++;
-						end
+					for (tile = 0; tile < tiles_in_group; tile++) begin
+						col_tile_idx = col_tile_start + tile;
+						dld_ids[tile] = next_id;
+						issue_and_commit(enc_dld_w(dense_regs[tile % 2], 3'd0), B_BASE + 32'(col_tile_idx * 16), ROW_STRIDE, next_id); 
+						next_id++; issued_cnt++;
 
-						if (tile > 0) begin
-							spmac_ids[tile-1] = next_id;
-							issue_and_commit(enc_spmac_w(3'd0, dense_regs[(tile-1) % 2], acc_regs[tile-1]), 32'd0, 32'd0, next_id); 
-							next_id++; issued_cnt++;
-						end
+						spmac_ids[tile] = next_id;
+						issue_and_commit(enc_spmac_w(3'd0, dense_regs[tile % 2], acc_regs[tile]), 32'd0, 32'd0, next_id); 
+						next_id++; issued_cnt++;
 					end
 				end
 
@@ -416,6 +585,9 @@ module quadrisparse_xif_tb;
 					issue_and_commit(enc_mst_w(acc_regs[tile]), C_BASE + 32'(row_idx * (N_COLS * 4) + col_tile_idx * 16), ROW_STRIDE, next_id);
 					next_id++; issued_cnt++;
 				end
+
+				/* wait (completed_results >= issued_cnt);
+				$finish; */
 			end
 		end
 		end
@@ -430,8 +602,8 @@ module quadrisparse_xif_tb;
 					issue_and_commit(enc_mzero(3'(acc)), '0, '0, next_id);
 					next_id++; issued_cnt++;
 				end
-				wait (completed_results >= issued_cnt);
-				repeat (2) @(posedge clk_i);
+				/* wait (completed_results >= issued_cnt);
+				repeat (2) @(posedge clk_i); */
 
 				for (int k = 0; k < K_PAD; k += 4) begin
 					a0 = A_BASE + (m       * K_PAD + k) * 4;
@@ -444,7 +616,7 @@ module quadrisparse_xif_tb;
 
 					issue_and_commit(enc_mld_w(3'd1), b0, ROW_STRIDE, next_id);
 					next_id++; issued_cnt++;
-					wait (completed_results >= issued_cnt); repeat (2) @(posedge clk_i);
+					//wait (completed_results >= issued_cnt); repeat (2) @(posedge clk_i);
 
 					issue_and_commit(enc_mmasa_w(3'd0, 3'd1, 3'd4), '0, '0, next_id);
 					next_id++; issued_cnt++;
@@ -481,7 +653,9 @@ module quadrisparse_xif_tb;
 
 				issue_and_commit(enc_mst_w(3'd7), c11, ROW_STRIDE, next_id);
 				next_id++; issued_cnt++;
-				wait (completed_results >= issued_cnt); repeat (2) @(posedge clk_i);
+				
+				/* wait (completed_results >= issued_cnt);
+				$finish; */
 			end
 		end
 		end
@@ -533,11 +707,12 @@ module quadrisparse_xif_tb;
 
 		//print_matrix(C_BASE, N_ROWS, N_COLS);
 
+		$fclose(trace_fd);
 		$finish;
 	end
 
 	initial begin
-		#5000us;
+		#50000ms;
 		$fatal(1, "[TB] Timeout: cycle=%0d issued=%0d completed=%0d", cycle_count, log_issue_ptr, completed_results);
 	end
 
