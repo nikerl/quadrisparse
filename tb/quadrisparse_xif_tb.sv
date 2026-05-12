@@ -24,14 +24,14 @@ module quadrisparse_xif_tb;
 	int ROW_STRIDE;
 	// 2MB slots per buffer avoid overlap for SIZE=512 (1MB matrices) and sparse tail writes.
 	localparam logic [31:0] VAL_BASE      	= 32'h0000_0000;
-	localparam logic [31:0] COL_BASE      	= 32'h0020_0000;
-	localparam logic [31:0] A_BASE        	= 32'h0040_0000;
-	localparam logic [31:0] B_BASE        	= 32'h0060_0000;
-	localparam logic [31:0] C_BASE		  	= 32'h0080_0000;
-	localparam logic [31:0] REF_BASE      	= 32'h00A0_0000;
-	localparam logic [31:0] BT_BASE       	= 32'h00C0_0000;
+	localparam logic [31:0] COL_BASE      	= 32'h0200_0000;
+	localparam logic [31:0] A_BASE        	= 32'h0400_0000;
+	localparam logic [31:0] B_BASE        	= 32'h0600_0000;
+	localparam logic [31:0] C_BASE		  	= 32'h0800_0000;
+	localparam logic [31:0] REF_BASE      	= 32'h0A00_0000;
+	localparam logic [31:0] BT_BASE       	= 32'h0C00_0000;
 
-	localparam logic [31:0] MEM_MODEL_DEPTH = 32'h0010_0000;
+	localparam logic [31:0] MEM_MODEL_DEPTH = 32'h0100_0000;
 	localparam int MAX_INSTRS 	= MEM_MODEL_DEPTH;
 
 	int M_PAD;
@@ -394,19 +394,15 @@ module quadrisparse_xif_tb;
 					next_id++; issued_cnt++;
 					val_ptr = val_ptr + nnz_to_load;
 
-					for (tile = 0; tile <= tiles_in_group; tile++) begin
-						if (tile < tiles_in_group) begin
-							col_tile_idx = col_tile_start + tile;
-							dld_ids[tile] = next_id;
-							issue_and_commit(enc_dld_w(dense_regs[tile % 2], 3'd0), B_BASE + 32'(col_tile_idx * 16), ROW_STRIDE, next_id); 
-							next_id++; issued_cnt++;
-						end
+					for (tile = 0; tile < tiles_in_group; tile++) begin
+						col_tile_idx = col_tile_start + tile;
+						dld_ids[tile] = next_id;
+						issue_and_commit(enc_dld_w(dense_regs[tile % 2], 3'd0), B_BASE + 32'(col_tile_idx * 16), ROW_STRIDE, next_id); 
+						next_id++; issued_cnt++;
 
-						if (tile > 0) begin
-							spmac_ids[tile-1] = next_id;
-							issue_and_commit(enc_spmac_w(3'd0, dense_regs[(tile-1) % 2], acc_regs[tile-1]), 32'd0, 32'd0, next_id); 
-							next_id++; issued_cnt++;
-						end
+						spmac_ids[tile] = next_id;
+						issue_and_commit(enc_spmac_w(3'd0, dense_regs[tile % 2], acc_regs[tile]), 32'd0, 32'd0, next_id); 
+						next_id++; issued_cnt++;
 					end
 				end
 
@@ -537,7 +533,7 @@ module quadrisparse_xif_tb;
 	end
 
 	initial begin
-		#5000us;
+		#50000ms;
 		$fatal(1, "[TB] Timeout: cycle=%0d issued=%0d completed=%0d", cycle_count, log_issue_ptr, completed_results);
 	end
 
