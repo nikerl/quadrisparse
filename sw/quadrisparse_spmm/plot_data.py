@@ -115,74 +115,60 @@ def plot_latency_graph(df):
 
 
 
-def plot_latency_difference(df):
-    fig, ax = plt.subplots(figsize=(10, 6))
-    mat_sizes = sorted(df['mat_size'].unique())
-    
-    dense_cy = df[df["sparsity"] == 1.0]["avg_cycles"]
-    ax.plot(mat_sizes, np.zeros(len(mat_sizes)), marker='s', color='black', label=f"Dense")
-    
-    for sparsity in sorted(df["sparsity"].unique()):
-        if sparsity < 0.7 or sparsity == 1.0:
-            continue
-        sparse_subset = df[df["sparsity"] == sparsity]
-        diff_cycles = sparse_subset["avg_cycles"] - dense_cy.values
-        ax.plot(mat_sizes, diff_cycles, marker='o', label=f"Sparsity: {sparsity*100:.0f}%")
-        
-    ax.set_xlabel('Matrix Size', fontsize=12)
-    ax.set_ylabel('Difference in Cycles', fontsize=12)
-    ax.set_title('Latency Difference vs Dense', fontsize=14, fontweight='bold')
-    ax.set_yscale('symlog', linthresh=1)
-    ax.set_xscale('log')
-    ax.set_xticks(mat_sizes)
-    ax.set_xticklabels(mat_sizes)
-    ax.legend(fontsize=10, loc='best')
-    ax.grid(True, alpha=0.3)
-    fig.tight_layout()
-    plt.savefig("latency_difference.pdf", format='pdf')
-    print(f"Plot saved as latency_difference.pdf")
-    
-    
-
 def plot_latency_relative(df):
+    plot_configs = [
+        {
+            'y': 'avg_cycles',
+            'ylabel': 'Relative Latency (Cycles)',
+            'title': 'Speedup Relative to Dense (Cycles)',
+            'filename': 'latency_relative-cy.pdf'
+        },
+        {
+            'y': 'avg_instructions',
+            'ylabel': 'Relative Latency (Instructions)',
+            'title': 'Speedup Relative to Dense (Instructions)',
+            'filename': 'latency_relative-instr.pdf'
+        }
+    ]
+    
     df = df[df['mat_size'] >= 16]
     
-    fig, ax = plt.subplots(figsize=(10, 6))
-    mat_sizes = sorted(df['mat_size'].unique())
-    
-    dense_cy = df[df["sparsity"] == 1.0]["avg_cycles"]
-    ax.plot(mat_sizes, np.ones(len(mat_sizes)), color='black', label=f"Dense", linewidth=3)
-    
-    for sparsity in sorted(df["sparsity"].unique()):
-        if sparsity < 0.7 or sparsity == 1.0:
-            continue
-        sparse_subset = df[df["sparsity"] == sparsity]
-        norm_latency = dense_cy.values / sparse_subset["avg_cycles"]
-        print(f"Sparsity: {sparsity*100:.0f}%, \n{norm_latency.values}")
-        ax.plot(mat_sizes, norm_latency, marker='o', label=f"Sparsity: {sparsity*100:.0f}%")
+    for config in plot_configs:
+        fig, ax = plt.subplots(figsize=(10, 6))
+        mat_sizes = sorted(df['mat_size'].unique())
         
-    ax.set_xlabel('Matrix Size', fontsize=12)
-    ax.set_ylabel('Relative Latency (Cycles)', fontsize=12)
-    ax.set_title('Speedup Relative to Dense', fontsize=14, fontweight='bold')
-    ax.set_xscale('log')
-    ax.set_xticks(mat_sizes)
-    ax.set_xticklabels(mat_sizes)
-    ax.legend(fontsize=10, loc='best')
-    ax.grid(True, alpha=0.3)
-    fig.tight_layout()
-    plt.savefig("latency_relative.pdf", format='pdf')
-    print(f"Plot saved as latency_relative.pdf")
+        dense_cy = df[df["sparsity"] == 1.0][config["y"]]
+        ax.plot(mat_sizes, np.ones(len(mat_sizes)), color='black', label=f"Dense", linewidth=3)
+        
+        for sparsity in sorted(df["sparsity"].unique()):
+            if sparsity < 0.7 or sparsity == 1.0:
+                continue
+            sparse_subset = df[df["sparsity"] == sparsity]
+            norm_latency = dense_cy.values / sparse_subset[config["y"]]
+            #print(f"Sparsity: {sparsity*100:.0f}%, \n{norm_latency.values}")
+            ax.plot(mat_sizes, norm_latency, marker='o', label=f"Sparsity: {sparsity*100:.0f}%")
+            
+        ax.set_xlabel('Matrix Size', fontsize=12)
+        ax.set_ylabel(config['ylabel'], fontsize=12)
+        ax.set_title(config['title'], fontsize=14, fontweight='bold')
+        ax.set_xscale('log')
+        ax.set_xticks(mat_sizes)
+        ax.set_xticklabels(mat_sizes)
+        ax.legend(fontsize=10, loc='best')
+        ax.grid(True, alpha=0.3)
+        fig.tight_layout()
+        plt.savefig(config['filename'], format='pdf')
+        print(f"Plot saved as {config['filename']}")
     
 
 
 def main():
     # Read the CSV file
-    df = pd.read_csv('benchmark/results-2.0.csv', skipinitialspace=True)
+    df = pd.read_csv('benchmark/results-2.1.csv', skipinitialspace=True)
     df.columns = df.columns.str.strip()
 
     #plot_latency_graph(df)
     #plot_speedup_bar(df)
-    #plot_latency_difference(df)
     plot_latency_relative(df)
 
 
