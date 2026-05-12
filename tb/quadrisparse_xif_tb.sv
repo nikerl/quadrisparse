@@ -586,8 +586,8 @@ module quadrisparse_xif_tb;
 					next_id++; issued_cnt++;
 				end
 
-				/* wait (completed_results >= issued_cnt);
-				$finish; */
+				wait (completed_results >= issued_cnt);
+				$finish;
 			end
 		end
 		end
@@ -654,8 +654,8 @@ module quadrisparse_xif_tb;
 				issue_and_commit(enc_mst_w(3'd7), c11, ROW_STRIDE, next_id);
 				next_id++; issued_cnt++;
 				
-				/* wait (completed_results >= issued_cnt);
-				$finish; */
+				wait (completed_results >= issued_cnt);
+				$finish;
 			end
 		end
 		end
