@@ -31,7 +31,6 @@ module quadrilatero_register_lsu #(
 
     output logic[xif_pkg::X_ID_WIDTH-1:0] lsu_id_o            ,
 
-    // Register Write Port for load unit
     output logic [    $clog2(N_REGS)-1:0] waddr_o             ,
     output logic [    $clog2(N_ROWS)-1:0] wrowaddr_o          ,
     output logic [              RLEN-1:0] wdata_o             ,
@@ -92,12 +91,9 @@ module quadrilatero_register_lsu #(
   logic [RLEN-1:0] store_fifo_data;
 
   logic [RLEN-1:0] data_mask;
-  // Sparse loads may start at an arbitrary 32-bit lane in a 128-bit row.
-  // We realign fetched data using the lane offset derived from address_i[3:2].
   logic [RLEN-1:0] sparse_aligned_data;
   logic [RLEN-1:0] sparse_lane_mask;
   logic [$clog2(N_ROWS+1)-1:0] sparse_nnz_clamped;
-  // Latched starting lane offset for the current sparse load instruction.
   logic [$clog2(N_ROWS)-1:0] sparse_lane_offset_q;
   logic [$clog2(N_ROWS)-1:0] sparse_lane_offset_d;
   logic load_fifo_valid;
@@ -132,7 +128,8 @@ module quadrilatero_register_lsu #(
   logic [$clog2(N_ROWS+1)-1:0] sparse_done_cnt_q;
   logic [$clog2(N_ROWS+1)-1:0] sparse_done_cnt_d;
 
-  assign mask_req     = (counter_q == $clog2(N_ROWS)'(N_ROWS - 1)) & finished_o & ~finished_ack_i;
+  assign mask_req     = (is_sparse_i ? (counter_q == $clog2(N_ROWS)'(N_ROWS/2 - 1))
+                                     : (counter_q == $clog2(N_ROWS)'(N_ROWS - 1))) & finished_o & ~finished_ack_i;
   always_comb begin
     lsu_id_o   = (write_i &~ load_fifo_data_available) ? instr_id_i : back_id_q;
 
@@ -147,7 +144,6 @@ module quadrilatero_register_lsu #(
   always_comb begin: write_to_RF
       // Default assignments
     data_mask  = '1 << (8 * n_bytes_cols_i);
-    // Shift so lane 0 corresponds to the requested start lane in memory.
     sparse_aligned_data = load_fifo_data >> (sparse_lane_offset_q * EL_WIDTH);
     sparse_lane_mask  = '0;
     sparse_nnz_clamped = (nnz_to_load_i > N_ROWS) ? $clog2(N_ROWS+1)'(N_ROWS) : $clog2(N_ROWS+1)'(nnz_to_load_i);
@@ -156,12 +152,12 @@ module quadrilatero_register_lsu #(
         sparse_lane_mask[lane*EL_WIDTH +: EL_WIDTH] = '1;
       end
     end
-      // Default / force for sparse
     we_o       = (load_fifo_data_available | (is_sparse_i & counter_q[$clog2(N_ROWS)-1])) & ~mask_req;
     waddr_o    = waddr_q;
     wrowaddr_o = counter_q;
     wdata_o    = load_fifo_data & ~data_mask;
-    wlast_o    = (counter_q == $clog2(N_ROWS)'(N_ROWS - 1)) && we_o && wready_i;
+    wlast_o    = (is_sparse_i ? (counter_q == $clog2(N_ROWS)'(N_ROWS/2 - 1))
+                             : (counter_q == $clog2(N_ROWS)'(N_ROWS - 1))) && we_o && wready_i;
     if (is_sparse_i) begin
         wrowaddr_o = counter_q;
       wdata_o = load_fifo_data_available ? (sparse_aligned_data & sparse_lane_mask) : '0;
@@ -178,12 +174,15 @@ module quadrilatero_register_lsu #(
 
 
   always_comb begin: lsu_ctrl_block
-    load_fifo_pop   = wready_i;
+    // For sparse loads: don't pop the data FIFO during zero-fill rows (counter MSB=1).
+    // Those rows are filled with zeros while data loads overlap; actual data is consumed
+    // only when writing rows 0..N_ROWS/2-1 (counter MSB=0).
+    load_fifo_pop = wready_i & (is_sparse_i ? ~counter_q[$clog2(N_ROWS)-1] : 1'b1);
     store_fifo_data = rdata_i;
     store_fifo_push = rdata_ready_o && rdata_valid_i;
     lsu_ready = store_fifo_empty | (write_i &~ load_fifo_data_available &~ lsu_busy_q);
     start  = (start_i | start_q) & lsu_ready;
-    busy_o = (write_i ? busy_d : busy | (load_fifo_data_available & counter_d == '0)) | start_q;
+    busy_o = (write_i ? (busy_d | busy) : busy | (is_sparse_i & we_o) | (load_fifo_data_available & counter_d == '0)) | start_q;
     stride  = (start) ? (is_sparse_i ? (stride_i - address_i) : stride_i) : stride_q;
     src_ptr = (start) ? address_i : src_ptr_q;
   end
@@ -191,7 +190,11 @@ module quadrilatero_register_lsu #(
    always_comb begin: next_value
     // SPARSE LOAD CONTROL
     if (is_sparse_i) begin
-        if (we_o && wready_i) begin
+        if (start) begin
+            // Start at row N_ROWS/2 so zero-fills of rows N_ROWS/2..N_ROWS-1 happen
+            // while memory loads are in flight, overlapping with the memory latency.
+            counter_d = $clog2(N_ROWS)'(N_ROWS / 2);
+        end else if (we_o && wready_i) begin
             counter_d = wlast_o ? '0 : counter_q + 1;
         end else begin
             counter_d = counter_q;
@@ -220,13 +223,14 @@ module quadrilatero_register_lsu #(
 
     stride_d   = (start) ? stride : stride_q;
     src_ptr_d  = (start) ? address_i : src_ptr_q;
-    // Capture lane offset from rs0 low address bits for sparse loads.
     sparse_lane_offset_d = start ? address_i[$clog2(N_ROWS)+1:2] : sparse_lane_offset_q;
 
-    back_id_d = (load_fifo_valid && counter_d==0  && ~valid_q) ? instr_id_i    : 
+    back_id_d = (start && is_sparse_i)                          ? instr_id_i    :
+                (load_fifo_valid && counter_d==0  && ~valid_q) ? instr_id_i    :
                   rlast_o                                       ? lsu_id_o      : back_id_q;
 
-    waddr_d   = (load_fifo_valid && counter_d==0) ? operand_reg_i : waddr_q;
+    waddr_d   = (start && is_sparse_i)            ? operand_reg_i :
+                (load_fifo_valid && counter_d==0) ? operand_reg_i : waddr_q;
 
     busy_d = (write_i && rlast_o && rdata_valid_i) ? 1'b0 :
              (write_i && start_i)                  ? 1'b1 : busy_q;

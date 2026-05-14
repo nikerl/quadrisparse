@@ -61,7 +61,7 @@ module quadrilatero_register_lsu_controller #(
   assign issue_queue_full_o = issue_queue_full | issue_queue_almost_full;
 
   fifo_v3 #(
-      .FALL_THROUGH(0),
+      .FALL_THROUGH(1),
       .DATA_WIDTH  (32),
       .DEPTH       (N_SLOTS),
       .dtype       (quadrilatero_pkg::lsu_instr_t)

@@ -167,6 +167,7 @@ module quadrilatero
   logic                      sa_ctrl_dispatch        ;
   logic                      sa_ctrl_wl_ready        ;
   logic                      sa_ctrl_start           ;
+  logic                      sa_wback_done_q         ;
   quadrilatero_pkg::sa_instr_t sa_ctrl_dispatched_instr;
   quadrilatero_pkg::sa_instr_t sa_ctrl_issued_instr    ;
 
@@ -647,7 +648,7 @@ module quadrilatero
       .RLEN             (quadrilatero_pkg::RLEN           ),
       .RF_READ_PORTS    (quadrilatero_pkg::RF_READ_PORTS  ),
       .RF_WRITE_PORTS   (quadrilatero_pkg::RF_WRITE_PORTS ),
-      .N_ENTRIES        (2       )
+      .N_ENTRIES        (4       )
   ) rf_seq_inst (
 
       .clk_i                                      ,
@@ -732,6 +733,15 @@ module quadrilatero
     sa_acc_rdata          = rf_seq_rdata_from_fu [quadrilatero_pkg::SYSTOLIC_ARRAY_A];
   end
 
+  // Prevent SA from starting the next instruction until the previous write-back completes.
+  // Without this gate, the SA pipeline carries internal accumulator state from one SPMAC_W
+  // into the next when they execute with overlapping write-back and read phases.
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) sa_wback_done_q <= 1'b1;
+    else if (sa_ctrl_start && sa_ctrl_issued_instr.sa_ctrl.is_spmac) sa_wback_done_q <= 1'b0;
+    else if (sa_finished)   sa_wback_done_q <= 1'b1;
+  end
+
   quadrilatero_systolic_array_controller #(
       .N_SLOTS            (2 ),
       .DATA_WIDTH         (32)
@@ -744,9 +754,9 @@ module quadrilatero
       .dispatched_instr_i (sa_ctrl_dispatched_instr             ),
 
       // To Systolic Array
-      .wl_ready_i         (sa_ctrl_wl_ready & ~x_res_almost_full),  // WL stage is ready for new instruction
-      .start_o            (sa_ctrl_start                        ),  // WL will start executing new instruction
-      .issued_instr_o     (sa_ctrl_issued_instr                 )   // issued instruction
+      .wl_ready_i         (sa_ctrl_wl_ready & ~x_res_almost_full & sa_wback_done_q),
+      .start_o            (sa_ctrl_start                        ),
+      .issued_instr_o     (sa_ctrl_issued_instr                 )
   );
 
   quadrilatero_systolic_array #(
@@ -1137,7 +1147,7 @@ module quadrilatero
 
   // Results XIF interface fifo
   fifo_v3 #(
-      .FALL_THROUGH(0),
+      .FALL_THROUGH(1),
       .DATA_WIDTH  (xif_pkg::X_ID_WIDTH            ),
       .DEPTH       (RES_IF_FIFO_DEPTH              ),
       .dtype       (logic [xif_pkg::X_ID_WIDTH-1:0])

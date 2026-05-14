@@ -180,11 +180,11 @@ module quadrilatero_systolic_array #(
     sa_ctrl_d     = (set_ff_active) ? sa_ctrl_i     : sa_ctrl_q    ;
 
     acc_fs_d      = (set_fs_active) ? acc_reg_q     : acc_fs_q     ;
-    dest_reg_d    = (set_dr_active) ? acc_fs_q      : dest_reg_q   ;
+    dest_reg_d    = (set_dr_active) ? (sa_ctrl_q.is_spmac ? acc_reg_q : acc_fs_q   )   : dest_reg_q   ;
 
     id_ff_d       = (set_ff_active) ? id_i          : id_ff_q      ;
     id_fs_d       = (set_fs_active) ? id_ff_q       : id_fs_q      ;
-    id_dr_d       = (set_dr_active) ? id_fs_q       : id_dr_q      ;
+    id_dr_d       = (set_dr_active) ? (sa_ctrl_q.is_spmac ? id_ff_q : id_fs_q     )  : id_dr_q      ;
 
     // Finished
     finished_d          = (res_wready_i && res_wlast_o) ? 1'b1 :
@@ -227,8 +227,8 @@ module quadrilatero_systolic_array #(
     dr_enable = dr_active_q;
 
     set_ff_active = ff_counter_d=='0 & start_i                                                                                          ;
-    set_fs_active = fs_counter_d=='0 & ff_counter_d=='0                                & ff_counter_q==$clog2(MESH_WIDTH)'(MESH_WIDTH-1);
-    set_dr_active = dr_counter_d=='0 & fs_counter_d==$clog2(MESH_WIDTH)'(MESH_WIDTH-1) & fs_counter_q==$clog2(MESH_WIDTH)'(MESH_WIDTH-2);
+    set_fs_active = fs_counter_d=='0 & ff_counter_d=='0 & ff_counter_q==$clog2(MESH_WIDTH)'(MESH_WIDTH-1) & ~sa_ctrl_q.is_spmac ;
+    set_dr_active = dr_counter_d=='0 & (sa_ctrl_q.is_spmac ? (ff_counter_d =='0 & ff_counter_q==$clog2(MESH_WIDTH)'(MESH_WIDTH-1)) : (fs_counter_d==$clog2(MESH_WIDTH)'(MESH_WIDTH-1) & fs_counter_q==$clog2(MESH_WIDTH)'(MESH_WIDTH-2)));
 
     rst_ff_active = ff_counter_q==$clog2(MESH_WIDTH)'(MESH_WIDTH-1) & ff_counter_d=='0                                      ;
     rst_fs_active = fs_counter_q==$clog2(MESH_WIDTH)'(MESH_WIDTH-1) & fs_counter_d=='0 & ff_counter_d=='0 & ff_counter_q=='0;
