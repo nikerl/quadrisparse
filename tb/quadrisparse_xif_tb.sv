@@ -487,6 +487,7 @@ module quadrisparse_xif_tb;
 		repeat (10) @(posedge clk_i);
 
 		$display("\n[TB] Cycles: %0d, Instructions: %0d", cycle_count, log_issue_ptr);
+		// Display timing log for all issued instructions
 		/* $display("\n[TIMING] %0d instructions", log_issue_ptr);
 		$display("[TIMING] idx   name        xif_id  issue   complete  latency");
 		for (int i = 0; i < log_issue_ptr; i++) begin
@@ -499,10 +500,11 @@ module quadrisparse_xif_tb;
 				instr_log[i].complete_cycle - instr_log[i].issue_cycle);
 		end */
 
+
 		//===========================================================================
 		// Compare result matrix at C_BASE against reference matrix at REF_BASE
 		//===========================================================================
-
+		
 		errors = 0;
 		for (int i = 0; i < N_ROWS; i++) begin
 			for (int j = 0; j < N_COLS; j++) begin

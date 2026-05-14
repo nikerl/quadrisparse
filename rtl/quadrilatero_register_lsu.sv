@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
 //
 // Author: Danilo Cammarata
+// Author: Oskar Swärd
 
 /*
 NOTE: for now we assume we fetch the entire row in 1 cycle. TODO: Change the number of columns and adapt this to arbitrary BUS_WIDTH parameters
