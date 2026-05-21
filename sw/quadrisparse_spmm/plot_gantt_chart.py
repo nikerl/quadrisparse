@@ -44,7 +44,7 @@ def assign_lanes(spans_for_unit):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("trace", nargs="?", default="trace.csv")
+    parser.add_argument("trace", nargs="?", default="benchmark/timeline.csv")
     parser.add_argument("--head", type=float, default=0.40,
                         help="Fraction of timeline to keep at the start (default 0.40)")
     parser.add_argument("--tail", type=float, default=0.40,
@@ -106,7 +106,7 @@ def main():
         "SPLD":  "spld",
         "DLD":   "dld",
         "MMASA": "mmac",
-        "SPMAC": "mmac",
+        "SPMAC": "spmac",
         "MST":   "mst",
     }
 
