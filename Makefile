@@ -62,9 +62,9 @@ help:
 	@echo "  make flist    - generate simulator file list"
 	@echo "  make compile  - compile $(TOP) with verilator"
 	@echo "  make run      - compile and run the testbench with verilator"
-	@echo "  make compile-iverilog - optional compile with iverilog"
-	@echo "  make run-iverilog     - optional run with iverilog"
+	@echo "  make matgen   - generate matrix files for testing"
 	@echo "  make clean    - remove build artifacts"
+	@echo "  make clean-mat - remove generated matrix files"
 
 deps:
 	$(BENDER) update
@@ -92,12 +92,6 @@ $(VERILATOR_SIMV): $(FLIST) $(RTL_SRCS) Bender.yml
 
 run: $(VERILATOR_SIMV)
 	$(VERILATOR_SIMV) $(RUN_PLUSARGS)
-
-compile-iverilog: flist
-	$(IVERILOG) -g2012 -s $(TOP) -o $(SIMV) -f $(FLIST)
-
-run-iverilog: compile-iverilog
-	$(VVP) $(SIMV)
 
 matgen:
 	$(PYTHON_VENV)/bin/python sw/quadrisparse_spmm/gen_mat.py $(MATGEN_ARGS)
