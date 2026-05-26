@@ -31,7 +31,7 @@ module quadrisparse_xif_tb;
 	localparam logic [31:0] REF_BASE      	= 32'h0A00_0000;
 	localparam logic [31:0] BT_BASE       	= 32'h0C00_0000;
 
-	localparam logic [31:0] MEM_MODEL_DEPTH = 32'h0100_0000;
+	localparam logic [31:0] MEM_MODEL_DEPTH = 32'h0200_0000;
 	localparam int MAX_INSTRS 	= MEM_MODEL_DEPTH;
 
 	int M_PAD;
@@ -426,8 +426,6 @@ module quadrisparse_xif_tb;
 					issue_and_commit(enc_mzero(3'(acc)), '0, '0, next_id);
 					next_id++; issued_cnt++;
 				end
-				wait (completed_results >= issued_cnt);
-				repeat (2) @(posedge clk_i);
 
 				for (int k = 0; k < K_PAD; k += 4) begin
 					a0 = A_BASE + (m       * K_PAD + k) * 4;
@@ -440,7 +438,6 @@ module quadrisparse_xif_tb;
 
 					issue_and_commit(enc_mld_w(3'd1), b0, ROW_STRIDE, next_id);
 					next_id++; issued_cnt++;
-					wait (completed_results >= issued_cnt); repeat (2) @(posedge clk_i);
 
 					issue_and_commit(enc_mmasa_w(3'd0, 3'd1, 3'd4), '0, '0, next_id);
 					next_id++; issued_cnt++;
@@ -477,7 +474,6 @@ module quadrisparse_xif_tb;
 
 				issue_and_commit(enc_mst_w(3'd7), c11, ROW_STRIDE, next_id);
 				next_id++; issued_cnt++;
-				wait (completed_results >= issued_cnt); repeat (2) @(posedge clk_i);
 			end
 		end
 		end

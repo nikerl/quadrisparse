@@ -17,7 +17,6 @@ task automatic issue_and_commit(
     input logic [3:0]  id
 );
     begin
-        @(posedge clk_i);
         x_issue_req.instr    <= instr;
         x_issue_req.id       <= id;
         x_issue_req.mode     <= 2'b11;
