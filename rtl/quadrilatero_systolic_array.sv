@@ -129,12 +129,13 @@ module quadrilatero_systolic_array #(
   logic [xif_pkg::X_ID_WIDTH-1:0] finished_instr_id_q;
   logic                           mask_req           ;
 
-  logic [RLEN-1:0]                spmac_result_d     ;
-  logic [RLEN-1:0]                spmac_result_q     ;
-  logic [RLEN-1:0]                spmac_acc_d        ;
-  logic [RLEN-1:0]                spmac_acc_q        ;
-  logic [RLEN-1:0]                spmac_data_d       ;
-  logic [RLEN-1:0]                spmac_data_q       ;
+  logic [MESH_WIDTH-1:0][RLEN-1:0] spmac_weight_buf_d ;
+  logic [MESH_WIDTH-1:0][RLEN-1:0] spmac_weight_buf_q ;
+  logic [RLEN-1:0]                 spmac_result_comb  ;
+  logic [RLEN-1:0]                 spmac_acc_d        ;
+  logic [RLEN-1:0]                 spmac_acc_q        ;
+  logic [RLEN-1:0]                 spmac_data_d       ;
+  logic [RLEN-1:0]                 spmac_data_q       ;
   logic [RLEN-1:0]                res_mesh_deskewed  ;
 
   quadrilatero_pkg::sa_ctrl_t [MESH_WIDTH-1:0]             sa_ctrl_mesh_skewed;
@@ -240,31 +241,30 @@ module quadrilatero_systolic_array #(
   end
 
   always_comb begin: spmac_block
-    spmac_acc_d    = spmac_acc_q;
-    spmac_result_d = spmac_result_q;
-    spmac_data_d   = spmac_data_q;
+    spmac_acc_d        = spmac_acc_q;
+    spmac_data_d       = spmac_data_q;
+    spmac_weight_buf_d = spmac_weight_buf_q;
 
     if (clear) begin
-      spmac_acc_d    = '0;
-      spmac_result_d = '0;
-      spmac_data_d   = '0;
+      spmac_acc_d        = '0;
+      spmac_data_d       = '0;
+      spmac_weight_buf_d = '0;
     end else if (sa_ctrl_q.is_spmac && ff_enable) begin
       if (ff_counter_q == '0) begin
         spmac_acc_d  = acc_rdata_i;
         spmac_data_d = data_rdata_i;
-        for (int j = 0; j < MESH_WIDTH; j++) begin
-          spmac_result_d[j*DATA_WIDTH +: DATA_WIDTH] =
-            spmac_result_q[j*DATA_WIDTH +: DATA_WIDTH] +
-            data_rdata_i[DATA_WIDTH-1:0] *
-            weight_rdata_i[j*DATA_WIDTH +: DATA_WIDTH];
-        end
-      end else begin
-        for (int j = 0; j < MESH_WIDTH; j++) begin
-          spmac_result_d[j*DATA_WIDTH +: DATA_WIDTH] =
-            spmac_result_q[j*DATA_WIDTH +: DATA_WIDTH] +
-            spmac_data_q[ff_counter_q*DATA_WIDTH +: DATA_WIDTH] *
-            weight_rdata_i[j*DATA_WIDTH +: DATA_WIDTH];
-        end
+      end
+      spmac_weight_buf_d[ff_counter_q] = weight_rdata_i;
+    end
+  end
+
+  always_comb begin: spmac_parallel_result
+    spmac_result_comb = '0;
+    for (int j = 0; j < MESH_WIDTH; j++) begin
+      for (int k = 0; k < MESH_WIDTH; k++) begin
+        spmac_result_comb[j*DATA_WIDTH +: DATA_WIDTH] +=
+          spmac_data_q[k*DATA_WIDTH +: DATA_WIDTH] *
+          spmac_weight_buf_q[k][j*DATA_WIDTH +: DATA_WIDTH];
       end
     end
   end
@@ -348,7 +348,7 @@ module quadrilatero_systolic_array #(
   );
 
   assign res_wdata_o = sa_ctrl_q.is_spmac ?
-    (dr_counter_q == '0 ? spmac_result_q + spmac_acc_q : '0) :
+    (dr_counter_q == '0 ? spmac_result_comb + spmac_acc_q : '0) :
     res_mesh_deskewed;
 
   always_ff @(posedge clk_i or negedge rst_ni) begin: seq_block
@@ -370,7 +370,7 @@ module quadrilatero_systolic_array #(
       id_dr_q             <= '0;
       finished_q          <= '0;
       finished_instr_id_q <= '0;
-      spmac_result_q      <= '0;
+      spmac_weight_buf_q  <= '0;
       spmac_acc_q         <= '0;
       spmac_data_q        <= '0;
     end else begin
@@ -391,7 +391,7 @@ module quadrilatero_systolic_array #(
       id_dr_q             <= id_dr_d             ;
       finished_q          <= finished_d          ;
       finished_instr_id_q <= finished_instr_id_d ;
-      spmac_result_q      <= spmac_result_d      ;
+      spmac_weight_buf_q  <= spmac_weight_buf_d  ;
       spmac_acc_q         <= spmac_acc_d         ;
       spmac_data_q        <= spmac_data_d        ;
     end
