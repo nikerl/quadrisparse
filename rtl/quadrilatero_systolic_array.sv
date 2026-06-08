@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
 //
 // Author: Danilo Cammarata
+// Author: Oskar Swärd
 
 /*
 
@@ -128,12 +129,15 @@ module quadrilatero_systolic_array #(
   logic [xif_pkg::X_ID_WIDTH-1:0] finished_instr_id_q;
   logic                           mask_req           ;
 
-  logic [RLEN-1:0]                spmac_result_d     ;
-  logic [RLEN-1:0]                spmac_result_q     ;
-  logic [RLEN-1:0]                spmac_acc_d        ;
-  logic [RLEN-1:0]                spmac_acc_q        ;
-  logic [RLEN-1:0]                spmac_data_d       ;
-  logic [RLEN-1:0]                spmac_data_q       ;
+  logic [RLEN-1:0]                                        spmac_acc_d        ;
+  logic [RLEN-1:0]                                        spmac_acc_q        ;
+  logic [MESH_WIDTH-1:0][DATA_WIDTH-1:0]                  spmac_data_d       ;
+  logic [MESH_WIDTH-1:0][DATA_WIDTH-1:0]                  spmac_data_q       ;
+  logic [MESH_WIDTH-1:0][MESH_WIDTH-1:0][DATA_WIDTH-1:0]  spmac_weight_d     ;
+  logic [MESH_WIDTH-1:0][MESH_WIDTH-1:0][DATA_WIDTH-1:0]  spmac_weight_q     ;
+  logic [RLEN-1:0]                                         spmac_result       ;
+  logic                                                   spmac_enable       ;
+  logic [MESH_WIDTH-1:0][DATA_WIDTH-1:0]                  data_rdata_unpacked;
   logic [RLEN-1:0]                res_mesh_deskewed  ;
 
   quadrilatero_pkg::sa_ctrl_t [MESH_WIDTH-1:0]             sa_ctrl_mesh_skewed;
@@ -154,7 +158,7 @@ module quadrilatero_systolic_array #(
 
     // Data Read Register Port
     data_raddr_o         = data_reg_q                ;
-    data_rrowaddr_o      = ff_counter_q              ;
+    data_rrowaddr_o      = sa_ctrl_q.is_spmac ? '0 : ff_counter_q;
     data_rdata_ready_o   = ff_active_q  &~ mask_req  ;
     data_rlast_o         = ff_counter_q==$clog2(MESH_WIDTH)'(MESH_WIDTH-1);
 
@@ -166,8 +170,9 @@ module quadrilatero_systolic_array #(
 
     // Accumulator Out Write Register Port
     res_waddr_o    = dest_reg_q;
-    res_wrowaddr_o = dr_counter_q;
-    res_we_o       = dr_active_q &~ mask_req;
+    res_wrowaddr_o = (sa_ctrl_q.is_spmac && dr_counter_q != '0)
+                   ? $clog2(MESH_WIDTH)'(dr_counter_q - 1) : dr_counter_q;
+    res_we_o       = (dr_active_q &~ mask_req) & ~(sa_ctrl_q.is_spmac & (dr_counter_q == '0));
     res_wlast_o    = dr_counter_q==$clog2(MESH_WIDTH)'(MESH_WIDTH-1);
   end
 
@@ -238,35 +243,37 @@ module quadrilatero_systolic_array #(
     mask_req = (dr_counter_q==$clog2(MESH_WIDTH)'(MESH_WIDTH-1)) & finished_q & ~finished_ack_i;
   end
 
-  always_comb begin: spmac_block
+  assign data_rdata_unpacked = data_rdata_i;
+
+  always_comb begin: spmac_capture
     spmac_acc_d    = spmac_acc_q;
-    spmac_result_d = spmac_result_q;
     spmac_data_d   = spmac_data_q;
+    spmac_weight_d = spmac_weight_q;
 
     if (clear) begin
       spmac_acc_d    = '0;
-      spmac_result_d = '0;
       spmac_data_d   = '0;
+      spmac_weight_d = '0;
     end else if (sa_ctrl_q.is_spmac && ff_enable) begin
-      if (ff_counter_q == '0) begin
-        spmac_acc_d  = acc_rdata_i;
-        spmac_data_d = data_rdata_i;
-        for (int j = 0; j < MESH_WIDTH; j++) begin
-          spmac_result_d[j*DATA_WIDTH +: DATA_WIDTH] =
-            spmac_result_q[j*DATA_WIDTH +: DATA_WIDTH] +
-            data_rdata_i[DATA_WIDTH-1:0] *
-            weight_rdata_i[j*DATA_WIDTH +: DATA_WIDTH];
-        end
-      end else begin
-        for (int j = 0; j < MESH_WIDTH; j++) begin
-          spmac_result_d[j*DATA_WIDTH +: DATA_WIDTH] =
-            spmac_result_q[j*DATA_WIDTH +: DATA_WIDTH] +
-            spmac_data_q[ff_counter_q*DATA_WIDTH +: DATA_WIDTH] *
-            weight_rdata_i[j*DATA_WIDTH +: DATA_WIDTH];
-        end
-      end
+      if (ff_counter_q == '0)
+        spmac_acc_d = acc_rdata_i;
+      spmac_data_d[ff_counter_q]   = data_rdata_unpacked[ff_counter_q];
+      spmac_weight_d[ff_counter_q] = weight_rdata_i;
     end
   end
+
+  assign spmac_enable = sa_ctrl_q.is_spmac & (ff_enable | (dr_active_q & (dr_counter_q == '0)));
+
+  spmac_grid_4x4_pipeline #(.MESH_WIDTH(MESH_WIDTH), .DATA_WIDTH(DATA_WIDTH)) spmac_inst (
+    .clk_i,
+    .rst_ni,
+    .enable_i (spmac_enable ),
+    .clear_i  (clear        ),
+    .data_i   (spmac_data_q ),
+    .weight_i  (spmac_weight_q),
+    .acc_i    (spmac_acc_q  ),
+    .result_o  (spmac_result )
+  );
 
   quadrilatero_skewer #(
       .MESH_WIDTH(MESH_WIDTH),
@@ -347,7 +354,7 @@ module quadrilatero_systolic_array #(
   );
 
   assign res_wdata_o = sa_ctrl_q.is_spmac ?
-    (dr_counter_q == '0 ? spmac_result_q + spmac_acc_q : '0) :
+    (dr_counter_q == 'd1 ? spmac_result : '0) :
     res_mesh_deskewed;
 
   always_ff @(posedge clk_i or negedge rst_ni) begin: seq_block
@@ -369,9 +376,9 @@ module quadrilatero_systolic_array #(
       id_dr_q             <= '0;
       finished_q          <= '0;
       finished_instr_id_q <= '0;
-      spmac_result_q      <= '0;
-      spmac_acc_q         <= '0;
-      spmac_data_q        <= '0;
+      spmac_acc_q    <= '0;
+      spmac_data_q   <= '0;
+      spmac_weight_q <= '0;
     end else begin
       ff_counter_q        <= ff_counter_d        ;
       fs_counter_q        <= fs_counter_d        ;
@@ -390,9 +397,9 @@ module quadrilatero_systolic_array #(
       id_dr_q             <= id_dr_d             ;
       finished_q          <= finished_d          ;
       finished_instr_id_q <= finished_instr_id_d ;
-      spmac_result_q      <= spmac_result_d      ;
-      spmac_acc_q         <= spmac_acc_d         ;
-      spmac_data_q        <= spmac_data_d        ;
+      spmac_acc_q    <= spmac_acc_d   ;
+      spmac_data_q   <= spmac_data_d  ;
+      spmac_weight_q <= spmac_weight_d;
     end
   end
  
