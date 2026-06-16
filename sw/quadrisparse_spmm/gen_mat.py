@@ -47,23 +47,35 @@ def generate_spmm_test_data(args):
          open(f"{PATH}/mat_{SIZE}_{SPARSITY}_a_col.hex", "w") as f_col, \
          open(f"{PATH}/mat_{SIZE}_{SPARSITY}_a_row.hex", "w") as f_row, \
          open(f"{PATH}/mat_{SIZE}_{SPARSITY}_a.hex", "w") as f_sparse:
+        
+        # Generate non zero values based on the specified sparsity
+        nnz = int(SIZE * SIZE * (1 - SPARSITY))
+        non_zero_values = np.random.randint(1, MAX_VAL, size=nnz)
+        
+        # Randomly place the non-zero values in the sparse matrix
+        for nz in non_zero_values:
+            while True: 
+                i = random.randint(0, SIZE - 1)
+                j = random.randint(0, SIZE - 1)
+                if sparse_matrix[i][j] == 0:
+                    sparse_matrix[i][j] = nz
+                    break
+                else:
+                    continue
+        
+        # Write the sparse matrix in both dense and CSR formats
+        for i in range(SIZE):
+            for j in range(SIZE):
+                f_sparse.write(f"{sparse_matrix[i][j]:08x}\n")
+                if sparse_matrix[i][j] != 0:
+                    f_val.write(f"{sparse_matrix[i][j]:08x}\n")
+                    f_col.write(f"{j:08x}\n")
 
+        # Generate row_ptr based on the non-zero values
         row_ptr = 0
         f_row.write(f"{row_ptr:08x}\n")
         for i in range(SIZE):
-            nnz = 0
-            for j in range(SIZE):
-                if random.random() > SPARSITY:
-                    nnz += 1
-                    val = random.randint(0, MAX_VAL)
-                    sparse_matrix[i][j] = val
-                    f_val.write(f"{val:08x}\n")
-                    f_col.write(f"{j:08x}\n")
-                    f_sparse.write(f"{val:08x}\n")
-                    row_ptr += 1
-                else:
-                    sparse_matrix[i][j] = 0
-                    f_sparse.write(f"00000000\n")
+            row_ptr += np.count_nonzero(sparse_matrix[i])
             f_row.write(f"{row_ptr:08x}\n")
             
     
