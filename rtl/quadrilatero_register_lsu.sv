@@ -175,9 +175,6 @@ module quadrilatero_register_lsu #(
 
 
   always_comb begin: lsu_ctrl_block
-    // For sparse loads: don't pop the data FIFO during zero-fill rows (counter MSB=1).
-    // Those rows are filled with zeros while data loads overlap; actual data is consumed
-    // only when writing rows 0..N_ROWS/2-1 (counter MSB=0).
     load_fifo_pop = wready_i & (is_sparse_i ? ~counter_q[$clog2(N_ROWS)-1] : 1'b1);
     store_fifo_data = rdata_i;
     store_fifo_push = rdata_ready_o && rdata_valid_i;
@@ -192,8 +189,6 @@ module quadrilatero_register_lsu #(
     // SPARSE LOAD CONTROL
     if (is_sparse_i) begin
         if (start) begin
-            // Start at row N_ROWS/2 so zero-fills of rows N_ROWS/2..N_ROWS-1 happen
-            // while memory loads are in flight, overlapping with the memory latency.
             counter_d = $clog2(N_ROWS)'(N_ROWS / 2);
         end else if (we_o && wready_i) begin
             counter_d = wlast_o ? '0 : counter_q + 1;
