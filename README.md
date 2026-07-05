@@ -5,7 +5,7 @@
 This project was developed as part of a master's thesis at Chalmers Univeristy of Technology. 
 
 ## Dependencies
-- Verilator: SV simulator
+- Verilator: SV simulator, only tested with v5.032
 - Bender: dependency management tool available [here](https://github.com/pulp-platform/bender)
 - Make
 - Python3
@@ -53,7 +53,7 @@ All instructions share `7'b0101011` (CUSTOM 1) as the major opcode, and func3 is
 | -------- | ----- | ----- |---- | ----- | ----- | ------ | ----- | ----- | --- | ------- |
 | SPLD_W   | 00100 | 00    | 0   | 000   | 000   | nnz $^3$    | func3 | 10    | md  | 0101011 |
 | DLD_W    | 00010 | 00    | 0   | 000   | 000   | ms1 $^1$   | func3 | 10    | md  | 0101011 |
-| SPMAC_W  | 11110 | 00    | 0   | ms1 $^1$  | ms2 $^2$  | md     | func3 | 10    | 000 | 0101011 |
+| SPMAC_W  | 01000 | 00    | 0   | ms1 $^1$  | ms2 $^2$  | md     | func3 | 10    | 000 | 0101011 |
 
 1. Sparse register
 2. Dense register 
